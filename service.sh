@@ -599,6 +599,13 @@ cmd_restore() {
   fi
   load_config
   log_sep "Restoring original values"
+  # The apply lock comes first, so a busy lock leaves everything as it is.
+  if ! lock_acquire "$APPLY_LOCK" 5; then
+    log_error "Restore: another apply is running - nothing restored"
+    echo "error=busy"
+    echo "rc=1"
+    return 1
+  fi
   # A running daemon would put the managed values straight back, so
   # enforcement is paused until Apply Now or the next reboot.
   if daemon_is_running; then
@@ -607,7 +614,6 @@ cmd_restore() {
   else
     _cr_paused=0
   fi
-  lock_acquire "$APPLY_LOCK" 5
   restore_originals
   lock_release "$APPLY_LOCK"
   if [ "$_cr_paused" -eq 1 ]; then

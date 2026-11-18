@@ -182,6 +182,21 @@ check "--restore: rc=0 restored=2" eval 'outhas rc=0 && outhas restored=2'
 check "--restore: adb_enabled back to 0" test "$(sget global adb_enabled)" = 0
 check "--restore: Developer Options left visible" test "$(sget global development_settings_enabled)" = 1
 
+# Another live process holds the apply lock: --restore must change nothing
+# and leave that lock alone.
+newcase restore-busy
+svc --config adb_enabled 1 >/dev/null
+sleep 30 &
+_holder=$!
+mkdir -p "$DOP_DATA_DIR/run/locks/apply"
+echo "$_holder" >"$DOP_DATA_DIR/run/locks/apply/pid"
+OUT=$(svc --restore)
+check "--restore with the apply lock busy: rc=1 error=busy" eval 'outhas rc=1 && outhas error=busy'
+check "--restore with the apply lock busy: lock left to its owner" has "$DOP_DATA_DIR/run/locks/apply/pid" "$_holder"
+check "--restore with the apply lock busy: nothing restored" test "$(sget global adb_enabled)" = 1
+kill "$_holder" 2>/dev/null
+wait "$_holder" 2>/dev/null
+
 newcase custom
 OUT=$(svc --custom-add system screen_off_timeout 600000)
 check "--custom-add: rc=0 id=c1" eval 'outhas rc=0 && outhas id=c1'

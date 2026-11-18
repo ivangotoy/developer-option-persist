@@ -1374,7 +1374,7 @@ async function doAction(type) {
       out = parseKV(await svc('--restore', 60000));
       showToast(out.rc === '0'
         ? (out.paused === '1' ? 'Restored · enforcement paused' : 'Original values restored')
-        : 'No snapshot available',
+        : (out.error === 'busy' ? 'Restore busy, try again' : 'No snapshot available'),
                 out.rc === '0' ? 'ok' : 'err');
     }
   } catch (e) {
