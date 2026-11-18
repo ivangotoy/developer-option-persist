@@ -9,7 +9,8 @@
 # pm, dumpsys) that keep their state in files, a module copy and a data
 # directory (DOP_DATA_DIR) in a scratch directory under TMPDIR. Nothing here
 # starts the daemon. Checks whose tool is missing (bash, python3) are reported
-# as skip. tests/ is not packed into the module zip (.forgejo/module-ci.conf).
+# as skip. tests/module-ci-release.sh runs .forgejo/module-ci.sh release
+# against a fake forge (tests/fake-forge.py). tests/ is not packed into the module zip (.forgejo/module-ci.conf).
 
 REPO=$(cd "$(dirname "$0")/.." && pwd) || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/dop-tests.XXXXXX") || exit 1
@@ -321,6 +322,26 @@ while [ -d "$DOP_DATA_DIR" ] && [ "$_i" -lt 50 ]; do
 done
 check "uninstall.sh: adb_enabled restored" test "$(sget global adb_enabled)" = 0
 check "uninstall.sh: data directory removed" test ! -d "$DOP_DATA_DIR"
+
+# -- .forgejo/module-ci.sh release, offline (tests/module-ci-release.sh) --
+if command -v bash >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 &&
+  command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  bash "$REPO/tests/module-ci-release.sh" >"$W/mci.out" 2>&1
+  _mrc=$?
+  while IFS= read -r _l; do
+    case "$_l" in
+      "ok   "*) ok "module-ci ${_l#ok   }" ;;
+      "FAIL "*) nok "module-ci ${_l#FAIL }" ;;
+      "     "*) echo "$_l" ;;
+    esac
+  done <"$W/mci.out"
+  if [ "$_mrc" != 0 ]; then
+    nok "module-ci release harness exited $_mrc"
+    tail -n 5 "$W/mci.out"
+  fi
+else
+  skip "module-ci release harness (needs bash, python3, git and curl)"
+fi
 
 echo "# $PASS passed, $FAIL failed, $SKIP skipped ($SHELL_ID)"
 [ "$FAIL" -eq 0 ]
