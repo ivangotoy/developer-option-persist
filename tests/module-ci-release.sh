@@ -175,6 +175,7 @@ conf_offset() { local v; v=$(sed -n 's/^VERSION_CODE_OFFSET=//p' "$REPO/.forgejo
 BUILT_VC=$(sed -n 's/^versionCode=//p' "$REPO/module.prop" | head -n1)
 VC=$((BUILT_VC + $(conf_offset)))
 A=/api/v1/repos/$REPOSITORY
+FLOOR=$(sed -n 's/^VERSION_CODE_FLOOR=//p' "$REPO/.forgejo/module-ci.conf" | head -n1)
 
 # ---------- normal release ----------
 
@@ -200,6 +201,9 @@ check "release: update.json zipUrl" [ "$(origin_show .forgejo/update.json | json
 check "release: published asset carries version" bash -c '[ "$(sed -n "s/^version=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$TAG"
 check "release: published asset carries versionCode" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$VC"
 check "release: published asset carries the forge updateJson" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
+# the fork releases above the upstream build it replaces (VERSION_CODE_OFFSET=1, VERSION_CODE_FLOOR=12)
+check "release: zip versionCode is module.prop's + 1 ($((BUILT_VC + 1)))" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$((BUILT_VC + 1))"
+check "release: update.json versionCode is module.prop's + 1 ($((BUILT_VC + 1)))" [ "$(origin_show .forgejo/update.json | json_get versionCode)" = "$((BUILT_VC + 1))" ]
 check "release: root module.prop untouched without SYNC_ROOT_PROP" bash -c '[ "$1" = "$2" ]' _ "$(origin_show module.prop)" "$(cat "$REPO/module.prop")"
 
 check "release: token in no curl or git argv" no_token_in_argv
@@ -240,6 +244,13 @@ scenario sync-odd-version "SYNC_ROOT_PROP=module.prop" "v1.3&x|y (z)" ""
 check "SYNC_ROOT_PROP with & | spaces in the version: exits 0" [ "$RC" = 0 ]
 check "SYNC_ROOT_PROP with & | spaces in the version: written as text" bash -c '[ "$(sed -n "s/^version=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "v1.3&x|y (z)-ci$RUN_NUMBER"
 check "SYNC_ROOT_PROP with & | spaces in the version: updateJson intact" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
+
+# ---------- versionCode floor ----------
+
+scenario below-floor "VERSION_CODE_OFFSET=0" "" ""
+check "versionCode $BUILT_VC again: exits non-zero" [ "$RC" != 0 ]
+check "versionCode $BUILT_VC again: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
+check "versionCode $BUILT_VC again: says why" grep -q "versionCode $BUILT_VC is below the floor $FLOOR" "$S/out"
 
 # ---------- dispatched commit not on main ----------
 
