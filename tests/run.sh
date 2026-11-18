@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC2016 # check arguments in single quotes are eval-ed on purpose
 # tests/run.sh - checks for this repo without any test framework.
 #
 #   sh tests/run.sh
@@ -30,7 +31,7 @@ elif [ -n "${BASH_VERSION:-}" ]; then SHELL_ID="bash $BASH_VERSION (as sh)"
 else SHELL_ID="sh ($(readlink -f /bin/sh 2>/dev/null))"; fi
 echo "# shell: $SHELL_ID"
 
-# ── Stubs ─────────────────────────────────────────────────────────────────────
+# -- Stubs --
 B="$W/bin"
 mkdir -p "$B"
 cat >"$B/settings" <<'EOF'
@@ -111,7 +112,7 @@ has() { grep -qx -- "$2" "$1" 2>/dev/null; }
 hasnt() { ! grep -qx -- "$2" "$1" 2>/dev/null; }
 outhas() { printf '%s\n' "$OUT" | grep -qx -- "$1"; }
 
-# ── Declared checks ───────────────────────────────────────────────────────────
+# -- Declared checks --
 for f in customize.sh service.sh uninstall.sh sh/common.sh META-INF/com/google/android/update-binary; do
   check "sh -n $f" sh -n "$REPO/$f"
 done
@@ -149,7 +150,7 @@ zip_paths_ok() {
 }
 check "module-ci.conf pack_paths leave out tests/" zip_paths_ok
 
-# ── Module behaviour ──────────────────────────────────────────────────────────
+# -- Module behaviour --
 newcase enforce
 OUT=$(svc --config adb_enabled 1)
 check "--config adb_enabled 1: rc=0 applied=1" eval 'outhas rc=0 && outhas applied=1'
