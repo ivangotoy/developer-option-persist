@@ -236,6 +236,22 @@ check "--restore custom: text value back" test "$(sget system example_mode)" = a
 check "--restore custom: property with , back" test "$(cat "$FAKE/props/persist.example.list")" = "a,b"
 check "--restore custom: empty setting left as it is" test "$(sget system example_empty)" = 5
 
+# A value over several lines must not reach the snapshot, where its second
+# line would read as the original of another key.
+newcase multiline
+svc --config adb_enabled 1 >/dev/null
+printf 'a\nadb_enabled=1\n' >"$FAKE/settings/system/screen_off_timeout"
+svc --custom-add system screen_off_timeout 600000 >/dev/null
+check "multi-line value: no foreign line in the snapshot" has "$DOP_DATA_DIR/original" adb_enabled=0
+check "multi-line value: snapshot holds one adb_enabled line" test "$(grep -c '^adb_enabled=' "$DOP_DATA_DIR/original")" = 1
+check "multi-line value: not kept as c1's original" eval '! grep -q "^c1=" "$DOP_DATA_DIR/original"'
+newcase multiline-capture
+mkdir -p "$DOP_DATA_DIR"
+echo "c1 system screen_off_timeout 600000" >"$DOP_DATA_DIR/custom"
+printf 'a\nadb_enabled=1\n' >"$FAKE/settings/system/screen_off_timeout"
+MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; load_config; capture_originals' >/dev/null 2>&1
+check "multi-line value at capture: snapshot taken without it" eval 'has "$DOP_DATA_DIR/original" adb_enabled=0 && ! grep -q -e "^c1=" -e "^adb_enabled=1" "$DOP_DATA_DIR/original"'
+
 newcase backup
 svc --config adb_enabled 1 >/dev/null
 OUT=$(svc --export)

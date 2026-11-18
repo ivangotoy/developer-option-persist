@@ -1075,6 +1075,8 @@ capture_originals() {
   : >"$_co_tmp"
   for _co_k in $KEYS; do
     if read_live "$_co_k"; then
+      # A value over several lines would add lines for other keys.
+      case "$LIVE_RAW" in *"$_NL"*) continue ;; esac
       printf '%s=%s\n' "$_co_k" "$LIVE_RAW" >>"$_co_tmp"
       case "$KIND" in
         global | secure) _co_settings_ok=1 ;;
@@ -1128,6 +1130,13 @@ orig_lookup() {
 # creating the file if needed. Called right before the module first writes
 # a key, so the snapshot holds the value from just before that write.
 set_original() {
+  # A value over several lines would add lines for other keys; it is not
+  # kept, so Restore Original and uninstall leave the key as it is.
+  case "$2" in
+    *"$_NL"*)
+      log_warn "original value of $1 spans several lines - not kept"
+      return 0 ;;
+  esac
   mkdir -p "$DATA_DIR" 2>/dev/null
   _so_tmp="$ORIGINAL_FILE.tmp.$$"
   {
