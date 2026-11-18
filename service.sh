@@ -1014,6 +1014,13 @@ cmd_custom_names() {
 # built-in keys, the setting is left as it is now.
 cmd_custom_del() {
   load_config
+  case "$1" in
+    c[1-9] | c[1-9][0-9] | c[1-9][0-9][0-9]) ;;
+    *)
+      echo "error=not-found"
+      echo "rc=1"
+      return 1 ;;
+  esac
   case " $CUSTOM_KEYS " in
     *" $1 "*) ;;
     *)

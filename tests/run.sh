@@ -173,6 +173,19 @@ check "--import ../config: bad name" eval 'outhas error=bad-name && outhas rc=1'
 svc --no-such-command >/dev/null
 check "unknown command exits 1" test "$?" = 1
 
+# Two adjacent key names are not one key.
+newcase multikey
+OUT=$(svc --config "adbinstall adbinput" skip)
+check "--config with two key names: rejected" eval 'outhas rc=1 && test ! -f "$DOP_DATA_DIR/config"'
+mkdir -p "$DOP_DATA_DIR"
+printf 'adbinstall adbinput=skip\nadb_enabled=1\n' >"$DOP_DATA_DIR/config"
+_err=$(sh "$M/service.sh" --status 2>&1 >/dev/null)
+check "config line with two key names: no command run for it" test -z "$_err"
+svc --custom-add system screen_off_timeout 600000 >/dev/null
+svc --custom-add system other_timeout 5 >/dev/null
+OUT=$(svc --custom-del "c1 c2")
+check "--custom-del with two ids: not found" eval 'outhas error=not-found && outhas rc=1'
+
 newcase restore
 svc --config adb_enabled 1 >/dev/null
 svc --config development_settings_enabled 0 >/dev/null

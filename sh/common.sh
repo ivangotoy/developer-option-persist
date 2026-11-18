@@ -241,6 +241,10 @@ valid_pkg() {
 
 # valid_value <key> <value> - what the config accepts for a managed key.
 valid_value() {
+  # One key name: a list of them would pass the callers' " $BASE_KEYS " match.
+  case "$1" in
+    '' | *[!a-z_]*) return 1 ;;
+  esac
   case "$2" in
     skip) return 0 ;;
   esac
