@@ -14,7 +14,7 @@ MODDIR="${MODDIR:-/data/adb/modules/$MODULE_ID}"
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Everything mutable lives outside the module directory, which a module update
 # replaces wholesale.
-DATA_DIR="/data/adb/$MODULE_ID"
+DATA_DIR="${DOP_DATA_DIR:-/data/adb/$MODULE_ID}" # DOP_DATA_DIR: test harness only
 CONFIG_FILE="$DATA_DIR/config"
 ORIGINAL_FILE="$DATA_DIR/original"
 # Keys the module has written since it last took them over. Only these are

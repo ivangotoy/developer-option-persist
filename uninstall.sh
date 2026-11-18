@@ -11,7 +11,7 @@
 # module directory.
 
 MODULE_ID="dev-options-persist"
-DATA_DIR="/data/adb/$MODULE_ID"
+DATA_DIR="${DOP_DATA_DIR:-/data/adb/$MODULE_ID}" # DOP_DATA_DIR: test harness only
 ORIGINAL_FILE="$DATA_DIR/original"
 TOUCHED_FILE="$DATA_DIR/managed"
 CONFIG_FILE="$DATA_DIR/config"
