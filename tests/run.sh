@@ -252,6 +252,47 @@ printf 'a\nadb_enabled=1\n' >"$FAKE/settings/system/screen_off_timeout"
 MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; load_config; capture_originals' >/dev/null 2>&1
 check "multi-line value at capture: snapshot taken without it" eval 'has "$DOP_DATA_DIR/original" adb_enabled=0 && ! grep -q -e "^c1=" -e "^adb_enabled=1" "$DOP_DATA_DIR/original"'
 
+# A failed write (full /data, here a file size limit) must keep the old
+# file. Only the module call runs under the limit; checks run outside it.
+limited() { (trap '' XFSZ; ulimit -f "$1"; shift; "$@") >/dev/null 2>&1; }
+common() { MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; load_config; '"$1"; }
+newcase wfail
+svc --config adb_enabled 1 >/dev/null
+limited 0 sh "$M/service.sh" --snapshot
+check "write failure: --snapshot keeps the snapshot" has "$DOP_DATA_DIR/original" adb_enabled=0
+limited 0 common 'set_touched adbinput 1'
+check "write failure: set_touched keeps the managed list" has "$DOP_DATA_DIR/managed" adb_enabled
+limited 0 common 'drop_original c9'
+check "write failure: drop_original keeps the snapshot" has "$DOP_DATA_DIR/original" adb_enabled=0
+_i=0
+while [ "$_i" -lt 60 ]; do
+  echo "# padding line $_i so the config is well over two kilobytes long ......"
+  _i=$((_i + 1))
+done >>"$DOP_DATA_DIR/config"
+echo "adbinput=skip" >>"$DOP_DATA_DIR/config"
+cp "$DOP_DATA_DIR/config" "$C/config.before"
+limited 1 sh "$M/service.sh" --config adbinput 1
+check "write failure: --config keeps the whole config" cmp -s "$C/config.before" "$DOP_DATA_DIR/config"
+: >"$DOP_DATA_DIR/custom"
+_i=1
+while [ "$_i" -le 30 ]; do
+  echo "c$_i system example_setting_with_a_long_name_number_${_i}_for_the_custom_file_size 1" >>"$DOP_DATA_DIR/custom"
+  _i=$((_i + 1))
+done
+cp "$DOP_DATA_DIR/custom" "$C/custom.before"
+limited 1 sh "$M/service.sh" --custom-add system example_other 2
+check "write failure: --custom-add keeps the whole custom list" cmp -s "$C/custom.before" "$DOP_DATA_DIR/custom"
+check "write failure: no temp files left" test -z "$(find "$DOP_DATA_DIR" -name '*.tmp.*')"
+newcase wfail-capture
+limited 0 common 'capture_originals'
+check "write failure: capture_originals leaves no empty snapshot" test ! -e "$DOP_DATA_DIR/original"
+newcase wfail-touched
+mkdir -p "$DOP_DATA_DIR"
+echo adb_enabled=1 >"$DOP_DATA_DIR/config"
+echo adb_enabled=0 >"$DOP_DATA_DIR/original"
+limited 0 common 'ensure_touched'
+check "write failure: ensure_touched leaves no empty managed list" test ! -e "$DOP_DATA_DIR/managed"
+
 newcase backup
 svc --config adb_enabled 1 >/dev/null
 OUT=$(svc --export)
