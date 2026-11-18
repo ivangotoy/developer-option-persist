@@ -4,7 +4,7 @@ routes that .forgejo/module-ci.sh release uses, on 127.0.0.1.
   python3 -I fake-forge.py PORT_FILE LOG_FILE ORIGIN_GIT_DIR REPOSITORY
 
 Every request is logged as one JSON line (method, path, Authorization header,
-body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500.
+body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the publish PATCH.
 """
 import json
 import os
@@ -84,6 +84,8 @@ class Handler(BaseHTTPRequestHandler):
             tag = releases[a["release"]]["tag"]
             return self.reply(200, {"id": int(parts[4]), "browser_download_url": f"{base}/{REPO}/releases/download/{tag}/{a['name']}"})
         if len(parts) == 3 and m == "PATCH":
+            if FAIL == "publish":
+                return self.reply(500, {"message": "forced failure"})
             req = json.loads(body)
             r = releases[int(parts[2])]
             r["draft"] = req.get("draft", r["draft"])

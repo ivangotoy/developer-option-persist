@@ -13,6 +13,7 @@ trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; rm -rf "$W"' EXIT
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; }
 check() { local n=$1; shift; if "$@"; then ok "$n"; else bad "$n"; fi; }
+not() { ! "$@"; }
 
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY
 unset GIT_CONFIG_COUNT GIT_DIR GIT_WORK_TREE
@@ -61,7 +62,10 @@ scenario() {
   printf '[url "file://%s/upstream.git"]\n\tinsteadOf = https://github.com/nikakvo/developer-option-persist.git\n' "$S" >> "$GIT_CONFIG_GLOBAL"
   (cd "$REPO" && tar -c --exclude=./.git --exclude=./.ci-out .) | tar -x -C "$S/seed"
   [ -n "$2" ] && printf '%s\n' "$2" >> "$S/seed/.forgejo/module-ci.conf"
-  [ -n "$3" ] && sed -i "s/^version=.*/version=$3/" "$S/seed/module.prop"
+  if [ -n "$3" ]; then
+    awk -v v="$3" '/^version=/ { print "version=" v; next } { print }' "$S/seed/module.prop" > "$S/module.prop"
+    cp "$S/module.prop" "$S/seed/module.prop"
+  fi
   (
     set -e
     cd "$S/seed"
@@ -79,6 +83,12 @@ scenario() {
     "$REAL_GIT" push -q "$S/upstream.git" up:refs/heads/main
   ) || { bad "$1: fixture repos"; return 1; }
   BASE=$("$REAL_GIT" -C "$S/seed" rev-parse main)
+  # OFF_MAIN=1: dispatch a commit that is in the clone (branch side) but not on main
+  RUN_BASE=$BASE
+  if [ -n "${OFF_MAIN:-}" ]; then
+    "$REAL_GIT" -C "$S/seed" push -q "$S/origin.git" up:refs/heads/side || { bad "$1: side branch"; return 1; }
+    RUN_BASE=$("$REAL_GIT" -C "$S/seed" rev-parse up)
+  fi
 
   # what the build step leaves in .ci-out (module-ci.sh build, without the uid switch)
   (
@@ -118,7 +128,7 @@ PY
   printf '[url "file://%s/origin.git"]\n\tinsteadOf = %s/%s.git\n' "$S" "$SERVER_URL" "$REPOSITORY" >> "$GIT_CONFIG_GLOBAL"
 
   (cd "$S" && PATH="$W/bin:$PATH" TMPDIR="$S/tmp" MCI_LOG="$S/log" SERVER_URL="$SERVER_URL" \
-    REPOSITORY="$REPOSITORY" BASE_SHA="$BASE" RELEASE_TOKEN="$TOKEN" RUN_NUMBER="$RUN_NUMBER" \
+    REPOSITORY="$REPOSITORY" BASE_SHA="$RUN_BASE" RELEASE_TOKEN="$TOKEN" RUN_NUMBER="$RUN_NUMBER" \
     bash "$REPO/.forgejo/module-ci.sh" release "$S/src") > "$S/out" 2>&1
   RC=$?
   cp "$S/requests" "$S/requests.release" 2>/dev/null
@@ -137,6 +147,28 @@ zip_prop() { python3 -I -c 'import sys,zipfile; print(zipfile.ZipFile(sys.argv[1
 origin_show() { "$REAL_GIT" --git-dir "$S/origin.git" show "main:$1" 2>/dev/null; }
 json_get() { python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read())[sys.argv[1]])' "$1" 2>/dev/null; }
 same_file() { cmp -s "$1" "$2" || { diff "$1" "$2" | sed "s/^/     /"; return 1; }; }
+no_token_in_argv() { ! grep -rlF -e "$TOKEN" "$S/log" | grep -q .; }
+tmp_empty() { [ -z "$(ls -A "$S/tmp")" ]; }
+curl_timeouts() {
+  local f n=0
+  for f in "$S"/log/curl.*; do
+    [ "$(grep -x -A1 -e --connect-timeout "$f" | sed -n 2p)" = 30 ] || return 1
+    [ "$(grep -x -A1 -e --max-time "$f" | sed -n 2p)" = 600 ] || return 1
+    n=$((n + 1))
+  done
+  [ "$n" -ge 10 ]
+}
+retry_reads_only() {
+  local f m gets=0
+  for f in "$S"/log/curl.*; do
+    m=$(grep -x -A1 -e -X "$f" | sed -n 2p)
+    case "$m" in
+      GET) grep -qx -e --retry "$f" || return 1; gets=$((gets + 1)) ;;
+      POST|PATCH|DELETE) ! grep -qx -e --retry "$f" || return 1 ;;
+    esac
+  done
+  [ "$gets" -ge "${1:-1}" ]
+}
 not_published() { ! grep -q '^PATCH ' "$S/calls"; }
 
 conf_offset() { local v; v=$(sed -n 's/^VERSION_CODE_OFFSET=//p' "$REPO/.forgejo/module-ci.conf" | head -n1); echo "${v:-0}"; }
@@ -170,13 +202,31 @@ check "release: published asset carries versionCode" bash -c '[ "$(sed -n "s/^ve
 check "release: published asset carries the forge updateJson" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
 check "release: root module.prop untouched without SYNC_ROOT_PROP" bash -c '[ "$1" = "$2" ]' _ "$(origin_show module.prop)" "$(cat "$REPO/module.prop")"
 
+check "release: token in no curl or git argv" no_token_in_argv
+check "release: git clone and pushes get the token from the environment" bash -c 'grep -qx clone "$1" && [ "$(grep -cx push "$1")" = 2 ]' _ "$S/log/git-env-auth"
+check "release: header file removed after success" tmp_empty
+check "release: every curl call has --connect-timeout 30 --max-time 600" curl_timeouts
+check "release: --retry on GET API calls only, never POST/PATCH/DELETE" retry_reads_only
+
 # ---------- failure after the draft exists ----------
 
 scenario fail-upload "" "" upload
 check "upload failure: exits non-zero" [ "$RC" != 0 ]
+check "upload failure: the failed upload is not retried" [ "$(grep -c "^POST $A/releases/1/assets" "$S/calls")" = 1 ]
+check "upload failure: no --retry on POST/DELETE" retry_reads_only 0
 check "upload failure: draft deleted" grep -qx "DELETE $A/releases/1 auth" "$S/calls"
 check "upload failure: nothing published" not_published
+check "upload failure: token in no curl or git argv" no_token_in_argv
+check "upload failure: header file removed" tmp_empty
 check "upload failure: main not moved" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main 2>/dev/null)" = "$BASE" ]
+
+# ---------- failure of the publish call ----------
+
+scenario fail-publish "" "" publish
+check "publish failure: exits non-zero" [ "$RC" != 0 ]
+check "publish failure: draft deleted" grep -qx "DELETE $A/releases/1 auth" "$S/calls"
+check "publish failure: merge already on main, no update.json commit" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main 2>/dev/null)" = "$SRC" ]
+check "publish failure: header file removed" tmp_empty
 
 # ---------- fork-owned module.prop kept at the released version ----------
 
@@ -185,5 +235,17 @@ check "SYNC_ROOT_PROP: exits 0" [ "$RC" = 0 ]
 check "SYNC_ROOT_PROP: root module.prop version" bash -c '[ "$(sed -n "s/^version=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "$TAG"
 check "SYNC_ROOT_PROP: root module.prop versionCode" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "$VC"
 check "SYNC_ROOT_PROP: root module.prop updateJson" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
+
+scenario sync-odd-version "SYNC_ROOT_PROP=module.prop" "v1.3&x|y (z)" ""
+check "SYNC_ROOT_PROP with & | spaces in the version: exits 0" [ "$RC" = 0 ]
+check "SYNC_ROOT_PROP with & | spaces in the version: written as text" bash -c '[ "$(sed -n "s/^version=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "v1.3&x|y (z)-ci$RUN_NUMBER"
+check "SYNC_ROOT_PROP with & | spaces in the version: updateJson intact" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(origin_show module.prop)" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
+
+# ---------- dispatched commit not on main ----------
+
+OFF_MAIN=1 scenario off-main "" "" ""
+check "dispatch of a commit not on main: exits non-zero" [ "$RC" != 0 ]
+check "dispatch of a commit not on main: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
+check "dispatch of a commit not on main: says why" grep -q "not in main" "$S/out"
 
 exit 0
