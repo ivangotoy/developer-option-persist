@@ -1246,8 +1246,10 @@ restore_originals() {
           continue
         } ;;
     esac
-    case "$KIND:$_ro_v" in
-      raw:*) ;;
+    # Custom values were checked above; an empty one is put back for a
+    # property only (unset), as uninstall.sh does.
+    [ "$TYPE" = raw ] && { [ -n "$_ro_v" ] || [ "$KIND" = prop ] || continue; }
+    [ "$TYPE" = raw ] || case "$KIND:$_ro_v" in
       appop:none) ;;
       appop:*)
         case "$_ro_v" in '' | *[!A-Za-z0-9._,]*) continue ;; esac ;;

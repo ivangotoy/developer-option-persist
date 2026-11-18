@@ -221,6 +221,21 @@ check "--custom-add bad target: rejected" eval 'outhas error=bad-target && outha
 OUT=$(svc --custom-del c1)
 check "--custom-del c1: removed, value left" eval 'outhas rc=0 && ! grep -q "^c1 " "$DOP_DATA_DIR/custom" && test "$(sget system screen_off_timeout)" = 600000'
 
+# Restore Original puts custom values back with the same rules as
+# uninstall.sh: any custom-charset value; an empty one only for a property.
+newcase restore-custom
+echo abc >"$FAKE/settings/system/example_mode"
+echo "a,b" >"$FAKE/props/persist.example.list"
+echo >"$FAKE/settings/system/example_empty"
+svc --custom-add system example_mode xyz >/dev/null
+svc --custom-add prop persist.example.list c,d >/dev/null
+svc --custom-add system example_empty 5 >/dev/null
+OUT=$(svc --restore)
+check "--restore custom: rc=0 restored=2" eval 'outhas rc=0 && outhas restored=2'
+check "--restore custom: text value back" test "$(sget system example_mode)" = abc
+check "--restore custom: property with , back" test "$(cat "$FAKE/props/persist.example.list")" = "a,b"
+check "--restore custom: empty setting left as it is" test "$(sget system example_empty)" = 5
+
 newcase backup
 svc --config adb_enabled 1 >/dev/null
 OUT=$(svc --export)
