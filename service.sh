@@ -55,6 +55,8 @@ done
 unset _k
 
 APPLIED=0
+# Keys whose original could not be saved; each is logged once per process.
+SO_FAILED=" "
 
 # check_keys <keys> - verify and correct. Returns 1 if the apply lock was
 # busy (another process is applying right now); the caller retries later.
@@ -144,9 +146,19 @@ check_keys() {
     # The first write since the module took this key over: the snapshot
     # gets the value from right before it, and the key is marked as one to
     # put back on Restore Original and uninstall.
+    # Without its original (or its managed mark) the key could never be put
+    # back, so it is left alone until both can be written.
     if ! is_touched "$_ck_k"; then
-      set_original "$_ck_k" "$LIVE_RAW"
-      set_touched "$_ck_k" 1
+      if ! set_original "$_ck_k" "$LIVE_RAW" || ! set_touched "$_ck_k" 1; then
+        case "$SO_FAILED" in
+          *" $_ck_k "*) ;;
+          *)
+            SO_FAILED="$SO_FAILED$_ck_k "
+            log_error "$_ck_k: the original value could not be saved - not changed until it can" ;;
+        esac
+        eval "RES_$_ck_k=fail"
+        continue
+      fi
       log_info "Captured original $_ck_k=${LIVE_RAW:-<unset>}"
     fi
 
@@ -642,24 +654,32 @@ cmd_snapshot() {
   fi
   _cs_n=0
   _cs_bad=0
+  _cs_fail=0
   for _cs_k in $KEYS; do
     is_touched "$_cs_k" || continue
     if read_live "$_cs_k"; then
-      set_original "$_cs_k" "$LIVE_RAW"
-      log_info "snapshot: $_cs_k=$LIVE_RAW"
-      _cs_n=$((_cs_n + 1))
+      if set_original "$_cs_k" "$LIVE_RAW"; then
+        log_info "snapshot: $_cs_k=$LIVE_RAW"
+        _cs_n=$((_cs_n + 1))
+      else
+        log_error "snapshot: $_cs_k could not be saved - old original kept"
+        _cs_fail=$((_cs_fail + 1))
+      fi
     else
       log_warn "snapshot: $_cs_k unreadable - old original kept"
       _cs_bad=$((_cs_bad + 1))
     fi
   done
   lock_release "$APPLY_LOCK"
-  log_info "New snapshot taken: $_cs_n value(s), $_cs_bad unreadable"
+  log_info "New snapshot taken: $_cs_n value(s), $_cs_bad unreadable, $_cs_fail not saved"
   echo "snapped=$_cs_n"
   echo "unreadable=$_cs_bad"
-  echo "rc=0"
-  unset _cs_n _cs_bad _cs_k
-  return 0
+  echo "failed=$_cs_fail"
+  _cs_rc=0
+  [ "$_cs_fail" -eq 0 ] || _cs_rc=1
+  echo "rc=$_cs_rc"
+  unset _cs_n _cs_bad _cs_fail _cs_k
+  return "$_cs_rc"
 }
 
 # --export - writes the current config (managed keys + tuning, already

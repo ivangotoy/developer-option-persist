@@ -247,6 +247,7 @@ svc --custom-add system screen_off_timeout 600000 >/dev/null
 check "multi-line value: no foreign line in the snapshot" has "$DOP_DATA_DIR/original" adb_enabled=0
 check "multi-line value: snapshot holds one adb_enabled line" test "$(grep -c '^adb_enabled=' "$DOP_DATA_DIR/original")" = 1
 check "multi-line value: not kept as c1's original" eval '! grep -q "^c1=" "$DOP_DATA_DIR/original"'
+check "multi-line value: key still written and managed" eval 'test "$(sget system screen_off_timeout)" = 600000 && has "$DOP_DATA_DIR/managed" c1'
 newcase multiline-capture
 mkdir -p "$DOP_DATA_DIR"
 echo "c1 system screen_off_timeout 600000" >"$DOP_DATA_DIR/custom"
@@ -285,6 +286,47 @@ cp "$DOP_DATA_DIR/custom" "$C/custom.before"
 limited 1 sh "$M/service.sh" --custom-add system example_other 2
 check "write failure: --custom-add keeps the whole custom list" cmp -s "$C/custom.before" "$DOP_DATA_DIR/custom"
 check "write failure: no temp files left" test -z "$(find "$DOP_DATA_DIR" -name '*.tmp.*')"
+# The snapshot or the managed list cannot be written (here: a big file under
+# a size limit): the key must not be changed or marked managed, the error is
+# logged once per key, and two passes in one process log it once.
+twopass() { sh -c 'set -- --status; . "$0" >/dev/null; check_keys adb_enabled; check_keys adb_enabled' "$M/service.sh"; }
+pad() {
+  _i=0
+  while [ "$_i" -lt 60 ]; do
+    echo "example_pad_$_i=a line that only makes this file larger than two kilobytes"
+    _i=$((_i + 1))
+  done >>"$1"
+}
+newcase nosnap
+mkdir -p "$DOP_DATA_DIR/logs"
+echo adb_enabled=1 >"$DOP_DATA_DIR/config"
+: >"$DOP_DATA_DIR/managed"
+pad "$DOP_DATA_DIR/original"
+: >"$DOP_DATA_DIR/logs/service.log"
+limited 1 twopass
+check "original not saved: key not changed" test "$(sget global adb_enabled)" = 0
+check "original not saved: key not marked managed" hasnt "$DOP_DATA_DIR/managed" adb_enabled
+check "original not saved: logged once for two passes" test "$(grep -c 'adb_enabled: the original value could not be saved' "$DOP_DATA_DIR/logs/service.log")" = 1
+check "original not saved: status Not Working" eval 'grep -q "^description=.* - Not Working$" "$M/module.prop"'
+twopass >/dev/null 2>&1
+check "original saved again: key written and managed" eval 'test "$(sget global adb_enabled)" = 1 && has "$DOP_DATA_DIR/managed" adb_enabled && has "$DOP_DATA_DIR/original" adb_enabled=0'
+newcase nomanaged
+mkdir -p "$DOP_DATA_DIR/logs"
+echo adb_enabled=1 >"$DOP_DATA_DIR/config"
+: >"$DOP_DATA_DIR/managed"
+pad "$DOP_DATA_DIR/managed"
+: >"$DOP_DATA_DIR/logs/service.log"
+limited 1 twopass
+check "managed list not saved: key not changed" test "$(sget global adb_enabled)" = 0
+check "managed list not saved: logged once for two passes" test "$(grep -c 'adb_enabled: the original value could not be saved' "$DOP_DATA_DIR/logs/service.log")" = 1
+newcase nosnapshot
+svc --config adb_enabled 1 >/dev/null
+pad "$DOP_DATA_DIR/original"
+cp "$DOP_DATA_DIR/original" "$C/original.before"
+OUT=$( (trap '' XFSZ; ulimit -f 1; sh "$M/service.sh" --snapshot) 2>/dev/null)
+check "--snapshot write failure: rc=1, not counted as snapped" eval 'outhas rc=1 && outhas snapped=0 && outhas failed=1'
+check "--snapshot write failure: snapshot unchanged" cmp -s "$C/original.before" "$DOP_DATA_DIR/original"
+
 newcase wfail-capture
 limited 0 common 'capture_originals'
 check "write failure: capture_originals leaves no empty snapshot" test ! -e "$DOP_DATA_DIR/original"

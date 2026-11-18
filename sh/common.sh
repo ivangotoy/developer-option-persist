@@ -1136,6 +1136,7 @@ orig_lookup() {
 # set_original <key> <value> - replaces (or adds) one line of the snapshot,
 # creating the file if needed. Called right before the module first writes
 # a key, so the snapshot holds the value from just before that write.
+# Returns 1 only when the snapshot could not be written.
 set_original() {
   # A value over several lines would add lines for other keys; it is not
   # kept, so Restore Original and uninstall leave the key as it is.
@@ -1159,9 +1160,10 @@ set_original() {
     printf '%s=%s\n' "$1" "$2" || _so_ok=0
   } >"$_so_tmp" 2>/dev/null
   chmod 600 "$_so_tmp" 2>/dev/null
-  if [ "$_so_ok" -eq 1 ] && mv -f "$_so_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_so_tmp" 2>/dev/null; fi
+  _so_rc=0
+  if [ "$_so_ok" -eq 1 ] && mv -f "$_so_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_so_tmp" 2>/dev/null; _so_rc=1; fi
   unset _so_tmp _so_l _so_ok
-  return 0
+  return "$_so_rc"
 }
 
 # drop_original <key> - removes the key's line from the snapshot.
@@ -1195,6 +1197,7 @@ is_touched() {
 }
 
 # set_touched <key> <1|0> - add the key to, or remove it from, TOUCHED_FILE.
+# Returns 1 when the file could not be written.
 set_touched() {
   mkdir -p "$DATA_DIR" 2>/dev/null
   _tc_tmp="$TOUCHED_FILE.tmp.$$"
@@ -1208,9 +1211,10 @@ set_touched() {
     if [ "$2" = 1 ]; then printf '%s\n' "$1" || _tc_ok=0; fi
   } >"$_tc_tmp" 2>/dev/null
   chmod 600 "$_tc_tmp" 2>/dev/null
-  if [ "$_tc_ok" -eq 1 ] && mv -f "$_tc_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_tc_tmp" 2>/dev/null; fi
+  _tc_rc=0
+  if [ "$_tc_ok" -eq 1 ] && mv -f "$_tc_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_tc_tmp" 2>/dev/null; _tc_rc=1; fi
   unset _tc_tmp _tc_l _tc_ok
-  return 0
+  return "$_tc_rc"
 }
 
 # ensure_touched - versions before v8.2 had no TOUCHED_FILE. For them every
