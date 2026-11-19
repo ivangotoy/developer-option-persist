@@ -204,9 +204,9 @@ check "release: update.json zipUrl" [ "$(origin_show .forgejo/update.json | json
 check "release: published asset carries version" bash -c '[ "$(sed -n "s/^version=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$TAG"
 check "release: published asset carries versionCode" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$VC"
 check "release: published asset carries the forge updateJson" bash -c '[ "$(sed -n "s/^updateJson=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$SERVER_URL/$REPOSITORY/raw/branch/main/.forgejo/update.json"
-# the fork releases above the upstream build it replaces (VERSION_CODE_OFFSET=1, VERSION_CODE_FLOOR=12)
-check "release: zip versionCode is module.prop's + 1 ($((BUILT_VC + 1)))" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$((BUILT_VC + 1))"
-check "release: update.json versionCode is module.prop's + 1 ($((BUILT_VC + 1)))" [ "$(origin_show .forgejo/update.json | json_get versionCode)" = "$((BUILT_VC + 1))" ]
+# the fork releases above the upstream build it replaces (VERSION_CODE_OFFSET=2, VERSION_CODE_FLOOR=13)
+check "release: zip versionCode is module.prop's + 2 ($((BUILT_VC + 2)))" bash -c '[ "$(sed -n "s/^versionCode=//p" <<<"$1")" = "$2" ]' _ "$(zip_prop "$S/asset.zip")" "$((BUILT_VC + 2))"
+check "release: update.json versionCode is module.prop's + 2 ($((BUILT_VC + 2)))" [ "$(origin_show .forgejo/update.json | json_get versionCode)" = "$((BUILT_VC + 2))" ]
 check "release: root module.prop untouched without SYNC_ROOT_PROP" bash -c '[ "$1" = "$2" ]' _ "$(origin_show module.prop)" "$(cat "$REPO/module.prop")"
 
 check "release: token in no curl or git argv" no_token_in_argv
