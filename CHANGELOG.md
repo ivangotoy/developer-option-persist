@@ -31,6 +31,7 @@ All notable changes to Developer Options Persist are documented here.
 - Two processes that find the same abandoned lock can no longer both take it.
 - Adding or removing a custom setting while another apply is running answers "Busy, try again" instead of leaving the old setting's saved value behind for a new one.
 - New Snapshot says "could not save" instead of "busy" when a value could not be written.
+- Importing a config with custom settings works also when the module runs under the system shell instead of busybox.
 
 ---
 
