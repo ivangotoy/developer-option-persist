@@ -307,6 +307,30 @@ check "--custom-add bad target: rejected" eval 'outhas error=bad-target && outha
 OUT=$(svc --custom-del c1)
 check "--custom-del c1: removed, value left" eval 'outhas rc=0 && ! grep -q "^c1 " "$DOP_DATA_DIR/custom" && test "$(sget system screen_off_timeout)" = 600000'
 
+# Custom add (new id) and delete need the apply lock to clear the id's
+# managed mark and original; while another live process holds it they
+# answer error=busy and change nothing.
+newcase custom-busy
+svc --custom-add system screen_off_timeout 600000 >/dev/null
+for _f in custom original managed; do cp "$DOP_DATA_DIR/$_f" "$C/$_f.before"; done
+sleep 30 &
+_holder=$!
+mkdir -p "$DOP_DATA_DIR/run/locks/apply"
+echo "$_holder" >"$DOP_DATA_DIR/run/locks/apply/pid"
+OUT=$(svc --custom-del c1)
+check "--custom-del with the apply lock busy: rc=1 error=busy" eval 'outhas rc=1 && outhas error=busy'
+check "--custom-del with the apply lock busy: custom list, managed mark and original kept" eval 'cmp -s "$C/custom.before" "$DOP_DATA_DIR/custom" && cmp -s "$C/managed.before" "$DOP_DATA_DIR/managed" && cmp -s "$C/original.before" "$DOP_DATA_DIR/original"'
+OUT=$(svc --custom-add system example_new 5)
+check "--custom-add of a new key with the apply lock busy: rc=1 error=busy, nothing added" eval 'outhas rc=1 && outhas error=busy && cmp -s "$C/custom.before" "$DOP_DATA_DIR/custom"'
+check "busy custom add/del: lock left to its owner" has "$DOP_DATA_DIR/run/locks/apply/pid" "$_holder"
+kill "$_holder" 2>/dev/null
+wait "$_holder" 2>/dev/null
+OUT=$(svc --custom-add system example_new 5)
+check "--custom-add with the apply lock free: added and applied" eval 'outhas rc=0 && outhas id=c2 && outhas applied=1 && test "$(sget system example_new)" = 5'
+OUT=$(svc --custom-del c1)
+check "--custom-del with the apply lock free: removed with its mark and original" eval 'outhas rc=0 && ! grep -q "^c1 " "$DOP_DATA_DIR/custom" && hasnt "$DOP_DATA_DIR/managed" c1 && ! grep -q "^c1=" "$DOP_DATA_DIR/original"'
+check "custom add/del: apply lock released" test ! -e "$DOP_DATA_DIR/run/locks/apply"
+
 # Restore Original puts custom values back with the same rules as
 # uninstall.sh: any custom-charset value; an empty one only for a property.
 newcase restore-custom

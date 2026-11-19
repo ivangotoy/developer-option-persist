@@ -947,17 +947,25 @@ cmd_custom_add() {
     _cca_new=1
   fi
   # A new id may have been used by a deleted key: start it clean, so its
-  # snapshot is taken fresh right before the first write.
-  if [ "$_cca_new" -eq 1 ] && lock_acquire "$APPLY_LOCK" 5; then
+  # snapshot is taken fresh right before the first write. Without the apply
+  # lock that cannot be done, so nothing is added.
+  if [ "$_cca_new" -eq 1 ]; then
+    if ! lock_acquire "$APPLY_LOCK" 5; then
+      echo "error=busy"
+      echo "rc=1"
+      unset _cca_id _cca_max _cca_n _cca_k _cca_num _cca_new
+      return 1
+    fi
     set_touched "$_cca_id" 0
     drop_original "$_cca_id"
-    lock_release "$APPLY_LOCK"
   fi
   if ! write_custom "" "$_cca_id" "$1" "$2" "$3"; then
+    [ "$_cca_new" -eq 1 ] && lock_release "$APPLY_LOCK"
     echo "rc=1"
     unset _cca_id _cca_max _cca_n _cca_k _cca_num _cca_new
     return 1
   fi
+  [ "$_cca_new" -eq 1 ] && lock_release "$APPLY_LOCK"
   load_config
   if [ "$_cca_new" -eq 1 ]; then
     log_info "Custom: added $1/$2=$3"
@@ -1053,16 +1061,23 @@ cmd_custom_del() {
   key_info "$1"
   _ccd_kind=$KIND
   _ccd_t=$TARGET
-  if ! write_custom "$1" ""; then
+  # Its managed mark and original go with it; without the apply lock they
+  # cannot, so the key is kept.
+  if ! lock_acquire "$APPLY_LOCK" 5; then
+    echo "error=busy"
     echo "rc=1"
     unset _ccd_kind _ccd_t
     return 1
   fi
-  if lock_acquire "$APPLY_LOCK" 5; then
-    set_touched "$1" 0
-    drop_original "$1"
+  if ! write_custom "$1" ""; then
     lock_release "$APPLY_LOCK"
+    echo "rc=1"
+    unset _ccd_kind _ccd_t
+    return 1
   fi
+  set_touched "$1" 0
+  drop_original "$1"
+  lock_release "$APPLY_LOCK"
   load_config
   log_info "Custom: removed $_ccd_kind/$_ccd_t - left as it is"
   daemon_is_running && kill -USR1 "$(daemon_pid)" 2>/dev/null
