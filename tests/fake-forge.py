@@ -4,7 +4,8 @@ routes that .forgejo/module-ci.sh release uses, on 127.0.0.1.
   python3 -I fake-forge.py PORT_FILE LOG_FILE ORIGIN_GIT_DIR REPOSITORY
 
 Every request is logged as one JSON line (method, path, Authorization header,
-body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the publish PATCH.
+body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the publish PATCH,
+=publish-lost applies the publish PATCH and then answers 500 (a lost reply).
 """
 import json
 import os
@@ -83,6 +84,9 @@ class Handler(BaseHTTPRequestHandler):
             a = assets[int(parts[4])]
             tag = releases[a["release"]]["tag"]
             return self.reply(200, {"id": int(parts[4]), "browser_download_url": f"{base}/{REPO}/releases/download/{tag}/{a['name']}"})
+        if len(parts) == 3 and m == "GET":
+            r = releases.get(int(parts[2]))
+            return self.reply(200, {"id": r["id"], "draft": r["draft"]}) if r else self.reply(404, {"message": "not found"})
         if len(parts) == 3 and m == "PATCH":
             if FAIL == "publish":
                 return self.reply(500, {"message": "forced failure"})
@@ -90,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
             r = releases[int(parts[2])]
             r["draft"] = req.get("draft", r["draft"])
             r["target"] = req.get("target_commitish", r["target"])
+            if FAIL == "publish-lost":
+                return self.reply(500, {"message": "forced failure after the change"})
             return self.reply(200, {"id": r["id"]})
         if len(parts) == 3 and m == "DELETE":
             releases.pop(int(parts[2]), None)

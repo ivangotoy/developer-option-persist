@@ -235,6 +235,13 @@ check "publish failure: draft deleted" grep -qx "DELETE $A/releases/1 auth" "$S/
 check "publish failure: merge already on main, no update.json commit" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main 2>/dev/null)" = "$SRC" ]
 check "publish failure: header file removed" tmp_empty
 
+# ---------- publish applied by the forge, reply lost ----------
+
+scenario fail-publish-lost "" "" publish-lost
+check "publish reply lost: exits non-zero" [ "$RC" != 0 ]
+check "publish reply lost: release state read before the cleanup" grep -qx "GET $A/releases/1 auth" "$S/calls"
+check "publish reply lost: published release not deleted" not grep -q "^DELETE " "$S/calls"
+
 # ---------- fork-owned module.prop kept at the released version ----------
 
 scenario sync "SYNC_ROOT_PROP=module.prop" "" ""
