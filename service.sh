@@ -883,29 +883,30 @@ write_custom() {
   _wcu_tmp="$CUSTOM_FILE.tmp.$$"
   _wcu_done=0
   _wcu_ok=1
+  _wcu_n=0
   {
-    printf '# Custom keys: <id> <kind> <target> <value>. Managed by the WebUI.\n' || _wcu_ok=0
+    printf '# Custom keys: <id> <kind> <target> <value>. Managed by the WebUI.\n' && _wcu_n=$((_wcu_n + 1)) || _wcu_ok=0
     for _wcu_k in $CUSTOM_KEYS; do
       [ "$_wcu_k" = "$1" ] && continue
       if [ "$_wcu_k" = "$2" ]; then
-        printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" || _wcu_ok=0
+        printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" && _wcu_n=$((_wcu_n + 1)) || _wcu_ok=0
         _wcu_done=1
         continue
       fi
       key_info "$_wcu_k"
       eval "_wcu_v=\$CFG_$_wcu_k"
-      printf '%s %s %s %s\n' "$_wcu_k" "$KIND" "$TARGET" "$_wcu_v" || _wcu_ok=0
+      printf '%s %s %s %s\n' "$_wcu_k" "$KIND" "$TARGET" "$_wcu_v" && _wcu_n=$((_wcu_n + 1)) || _wcu_ok=0
     done
-    if [ -n "$2" ] && [ "$_wcu_done" -eq 0 ]; then printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" || _wcu_ok=0; fi
+    if [ -n "$2" ] && [ "$_wcu_done" -eq 0 ]; then printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" && _wcu_n=$((_wcu_n + 1)) || _wcu_ok=0; fi
   } >"$_wcu_tmp" 2>/dev/null
   _wcu_rc=1
-  if [ "$_wcu_ok" -eq 1 ] && [ -s "$_wcu_tmp" ]; then
+  if [ "$_wcu_ok" -eq 1 ] && [ -s "$_wcu_tmp" ] && _lines_ok "$_wcu_tmp" "$_wcu_n"; then
     chmod 600 "$_wcu_tmp" 2>/dev/null
     mv -f "$_wcu_tmp" "$CUSTOM_FILE" 2>/dev/null && _wcu_rc=0
   fi
   rm -f "$_wcu_tmp" 2>/dev/null
   lock_release "$CONFIG_LOCK"
-  unset _wcu_tmp _wcu_done _wcu_ok _wcu_k _wcu_v
+  unset _wcu_n _wcu_tmp _wcu_done _wcu_ok _wcu_k _wcu_v
   return "$_wcu_rc"
 }
 

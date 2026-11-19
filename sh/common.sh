@@ -985,6 +985,19 @@ load_config() {
   return 0
 }
 
+# _lines_ok <file> <n> - the file holds exactly n complete lines. The writers
+# below count the lines they printed: a short write that printf did not
+# report (an external printf exits 0 when the file system refuses the data)
+# still fails here.
+_lines_ok() {
+  _lo_n=0
+  while IFS= read -r _lo_l; do
+    _lo_n=$((_lo_n + 1))
+  done <"$1" 2>/dev/null
+  unset _lo_l
+  [ "$_lo_n" -eq "$2" ]
+}
+
 # write_cfg <key> <value> - replaces the line in place, so the file keeps its
 # order and comments, and appends the key if it was missing.
 write_cfg() {
@@ -995,6 +1008,7 @@ write_cfg() {
   _wc_tmp="$CONFIG_FILE.tmp.$$"
   _wc_done=0
   _wc_ok=1
+  _wc_n=0
   {
     if [ -f "$CONFIG_FILE" ]; then
       while IFS= read -r _wc_l || [ -n "$_wc_l" ]; do
@@ -1004,25 +1018,25 @@ write_cfg() {
         case "$_wc_l" in
           *=*)
             if [ "$_t" = "$1" ]; then
-              if [ "$_wc_done" -eq 0 ]; then printf '%s=%s\n' "$1" "$2" || _wc_ok=0; fi
+              if [ "$_wc_done" -eq 0 ]; then printf '%s=%s\n' "$1" "$2" && _wc_n=$((_wc_n + 1)) || _wc_ok=0; fi
               _wc_done=1
               continue
             fi ;;
         esac
-        printf '%s\n' "$_wc_l" || _wc_ok=0
+        printf '%s\n' "$_wc_l" && _wc_n=$((_wc_n + 1)) || _wc_ok=0
       done <"$CONFIG_FILE"
     fi
-    if [ "$_wc_done" -ne 1 ]; then printf '%s=%s\n' "$1" "$2" || _wc_ok=0; fi
+    if [ "$_wc_done" -ne 1 ]; then printf '%s=%s\n' "$1" "$2" && _wc_n=$((_wc_n + 1)) || _wc_ok=0; fi
   } >"$_wc_tmp" 2>/dev/null
 
   _wc_rc=1
-  if [ "$_wc_ok" -eq 1 ] && [ -s "$_wc_tmp" ]; then
+  if [ "$_wc_ok" -eq 1 ] && [ -s "$_wc_tmp" ] && _lines_ok "$_wc_tmp" "$_wc_n"; then
     chmod 600 "$_wc_tmp" 2>/dev/null
     mv -f "$_wc_tmp" "$CONFIG_FILE" 2>/dev/null && _wc_rc=0
   fi
   rm -f "$_wc_tmp" 2>/dev/null
   lock_release "$CONFIG_LOCK"
-  unset _wc_tmp _wc_done _wc_ok _wc_l _t
+  unset _wc_n _wc_tmp _wc_done _wc_ok _wc_l _t
   return "$_wc_rc"
 }
 
@@ -1088,12 +1102,13 @@ capture_originals() {
   _co_tmp="$ORIGINAL_FILE.tmp.$$"
   _co_settings_ok=0
   _co_wok=1
+  _co_n=0
   : >"$_co_tmp"
   for _co_k in $KEYS; do
     if read_live "$_co_k"; then
       # A value over several lines would add lines for other keys.
       case "$LIVE_RAW" in *"$_NL"*) continue ;; esac
-      printf '%s=%s\n' "$_co_k" "$LIVE_RAW" >>"$_co_tmp" || _co_wok=0
+      printf '%s=%s\n' "$_co_k" "$LIVE_RAW" >>"$_co_tmp" && _co_n=$((_co_n + 1)) || _co_wok=0
       case "$KIND" in
         global | secure) _co_settings_ok=1 ;;
       esac
@@ -1101,7 +1116,7 @@ capture_originals() {
   done
   # Only keep the snapshot if it was written and the settings provider
   # actually answered.
-  if [ "$_co_wok" -ne 1 ]; then
+  if [ "$_co_wok" -ne 1 ] || ! _lines_ok "$_co_tmp" "$_co_n"; then
     rm -f "$_co_tmp"
     log_error "Could not write the original values - not captured yet"
     _co_rc=1
@@ -1115,7 +1130,7 @@ capture_originals() {
     log_warn "Could not capture original values yet - settings provider not ready"
     _co_rc=1
   fi
-  unset _co_tmp _co_k _co_settings_ok _co_wok
+  unset _co_n _co_tmp _co_k _co_settings_ok _co_wok
   return "$_co_rc"
 }
 
@@ -1162,21 +1177,22 @@ set_original() {
   mkdir -p "$DATA_DIR" 2>/dev/null
   _so_tmp="$ORIGINAL_FILE.tmp.$$"
   _so_ok=1
+  _so_n=0
   {
     if [ -f "$ORIGINAL_FILE" ]; then
       while IFS= read -r _so_l || [ -n "$_so_l" ]; do
         case "$_so_l" in
           "$1="*) ;;
-          *) printf '%s\n' "$_so_l" || _so_ok=0 ;;
+          *) printf '%s\n' "$_so_l" && _so_n=$((_so_n + 1)) || _so_ok=0 ;;
         esac
       done <"$ORIGINAL_FILE"
     fi
-    printf '%s=%s\n' "$1" "$2" || _so_ok=0
+    printf '%s=%s\n' "$1" "$2" && _so_n=$((_so_n + 1)) || _so_ok=0
   } >"$_so_tmp" 2>/dev/null
   chmod 600 "$_so_tmp" 2>/dev/null
   _so_rc=0
-  if [ "$_so_ok" -eq 1 ] && mv -f "$_so_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_so_tmp" 2>/dev/null; _so_rc=1; fi
-  unset _so_tmp _so_l _so_ok
+  if [ "$_so_ok" -eq 1 ] && _lines_ok "$_so_tmp" "$_so_n" && mv -f "$_so_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_so_tmp" 2>/dev/null; _so_rc=1; fi
+  unset _so_n _so_tmp _so_l _so_ok
   return "$_so_rc"
 }
 
@@ -1185,15 +1201,16 @@ drop_original() {
   [ -f "$ORIGINAL_FILE" ] || return 0
   _do_tmp="$ORIGINAL_FILE.tmp.$$"
   _do_ok=1
+  _do_n=0
   while IFS= read -r _do_l || [ -n "$_do_l" ]; do
     case "$_do_l" in
       "$1="*) ;;
-      *) printf '%s\n' "$_do_l" || _do_ok=0 ;;
+      *) printf '%s\n' "$_do_l" && _do_n=$((_do_n + 1)) || _do_ok=0 ;;
     esac
   done <"$ORIGINAL_FILE" >"$_do_tmp" 2>/dev/null
   chmod 600 "$_do_tmp" 2>/dev/null
-  if [ "$_do_ok" -eq 1 ] && mv -f "$_do_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_do_tmp" 2>/dev/null; fi
-  unset _do_tmp _do_l _do_ok
+  if [ "$_do_ok" -eq 1 ] && _lines_ok "$_do_tmp" "$_do_n" && mv -f "$_do_tmp" "$ORIGINAL_FILE" 2>/dev/null; then :; else rm -f "$_do_tmp" 2>/dev/null; fi
+  unset _do_n _do_tmp _do_l _do_ok
   return 0
 }
 
@@ -1216,18 +1233,19 @@ set_touched() {
   mkdir -p "$DATA_DIR" 2>/dev/null
   _tc_tmp="$TOUCHED_FILE.tmp.$$"
   _tc_ok=1
+  _tc_n=0
   {
     if [ -f "$TOUCHED_FILE" ]; then
       while IFS= read -r _tc_l || [ -n "$_tc_l" ]; do
-        if [ -n "$_tc_l" ] && [ "$_tc_l" != "$1" ]; then printf '%s\n' "$_tc_l" || _tc_ok=0; fi
+        if [ -n "$_tc_l" ] && [ "$_tc_l" != "$1" ]; then printf '%s\n' "$_tc_l" && _tc_n=$((_tc_n + 1)) || _tc_ok=0; fi
       done <"$TOUCHED_FILE"
     fi
-    if [ "$2" = 1 ]; then printf '%s\n' "$1" || _tc_ok=0; fi
+    if [ "$2" = 1 ]; then printf '%s\n' "$1" && _tc_n=$((_tc_n + 1)) || _tc_ok=0; fi
   } >"$_tc_tmp" 2>/dev/null
   chmod 600 "$_tc_tmp" 2>/dev/null
   _tc_rc=0
-  if [ "$_tc_ok" -eq 1 ] && mv -f "$_tc_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_tc_tmp" 2>/dev/null; _tc_rc=1; fi
-  unset _tc_tmp _tc_l _tc_ok
+  if [ "$_tc_ok" -eq 1 ] && _lines_ok "$_tc_tmp" "$_tc_n" && mv -f "$_tc_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_tc_tmp" 2>/dev/null; _tc_rc=1; fi
+  unset _tc_n _tc_tmp _tc_l _tc_ok
   return "$_tc_rc"
 }
 
@@ -1239,17 +1257,18 @@ ensure_touched() {
   mkdir -p "$DATA_DIR" 2>/dev/null
   _et_tmp="$TOUCHED_FILE.tmp.$$"
   _et_ok=1
+  _et_n=0
   : >"$_et_tmp"
   if [ -f "$ORIGINAL_FILE" ]; then
     for _et_k in $KEYS; do
       eval "_et_v=\$CFG_$_et_k"
       [ "$_et_v" = skip ] && continue
-      if grep -q "^$_et_k=" "$ORIGINAL_FILE" 2>/dev/null; then printf '%s\n' "$_et_k" >>"$_et_tmp" || _et_ok=0; fi
+      if grep -q "^$_et_k=" "$ORIGINAL_FILE" 2>/dev/null; then printf '%s\n' "$_et_k" >>"$_et_tmp" && _et_n=$((_et_n + 1)) || _et_ok=0; fi
     done
   fi
   chmod 600 "$_et_tmp" 2>/dev/null
-  if [ "$_et_ok" -eq 1 ] && mv -f "$_et_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_et_tmp" 2>/dev/null; fi
-  unset _et_tmp _et_k _et_v _et_ok
+  if [ "$_et_ok" -eq 1 ] && _lines_ok "$_et_tmp" "$_et_n" && mv -f "$_et_tmp" "$TOUCHED_FILE" 2>/dev/null; then :; else rm -f "$_et_tmp" 2>/dev/null; fi
+  unset _et_n _et_tmp _et_k _et_v _et_ok
   return 0
 }
 

@@ -363,6 +363,33 @@ OUT=$( (trap '' XFSZ; ulimit -f 1; sh "$M/service.sh" --snapshot) 2>/dev/null)
 check "--snapshot write failure: rc=1, not counted as snapped" eval 'outhas rc=1 && outhas snapped=0 && outhas failed=1'
 check "--snapshot write failure: snapshot unchanged" cmp -s "$C/original.before" "$DOP_DATA_DIR/original"
 
+# A printf that loses the data and still exits 0 (an external printf on a
+# full file system does that): every writer must notice the short file and
+# keep the old one. Here printf is a function that drops its first line
+# and writes the rest.
+lossy() { MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; load_config; printf() { if [ -z "$_lp" ]; then _lp=1; return 0; fi; command printf "$@"; }; '"$1" >/dev/null 2>&1; }
+newcase lossy
+svc --config adb_enabled 1 >/dev/null
+svc --custom-add system example_mode 5 >/dev/null
+for _f in config original managed custom; do cp "$DOP_DATA_DIR/$_f" "$C/$_f.before"; done
+lossy 'write_cfg adbinput 1'
+check "silent short write: write_cfg keeps the config" cmp -s "$C/config.before" "$DOP_DATA_DIR/config"
+lossy 'set_original adb_enabled 5'
+check "silent short write: set_original keeps the snapshot" cmp -s "$C/original.before" "$DOP_DATA_DIR/original"
+lossy 'drop_original adb_enabled'
+check "silent short write: drop_original keeps the snapshot" cmp -s "$C/original.before" "$DOP_DATA_DIR/original"
+lossy 'set_touched adbinput 1'
+check "silent short write: set_touched keeps the managed list" cmp -s "$C/managed.before" "$DOP_DATA_DIR/managed"
+sh -c 'set -- --status; . "$0" >/dev/null; printf() { if [ -z "$_lp" ]; then _lp=1; return 0; fi; command printf "$@"; }; write_custom "" c9 system example_other 1' "$M/service.sh" >/dev/null 2>&1
+check "silent short write: write_custom keeps the custom list" cmp -s "$C/custom.before" "$DOP_DATA_DIR/custom"
+rm -f "$DOP_DATA_DIR/original" "$DOP_DATA_DIR/managed"
+lossy 'capture_originals'
+check "silent short write: capture_originals leaves no short snapshot" test ! -e "$DOP_DATA_DIR/original"
+cp "$C/original.before" "$DOP_DATA_DIR/original"
+lossy 'ensure_touched'
+check "silent short write: ensure_touched leaves no short managed list" test ! -e "$DOP_DATA_DIR/managed"
+check "silent short write: no temp files left" test -z "$(find "$DOP_DATA_DIR" -name '*.tmp.*')"
+
 newcase wfail-capture
 limited 0 common 'capture_originals'
 check "write failure: capture_originals leaves no empty snapshot" test ! -e "$DOP_DATA_DIR/original"
