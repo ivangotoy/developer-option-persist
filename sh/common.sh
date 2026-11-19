@@ -125,10 +125,11 @@ key_info() {
 
 # ── Custom keys ───────────────────────────────────────────────────────────────
 # valid_custom_value <value> - letters, digits and . _ , : + - only. No spaces,
-# so a `cmd` failure message can never pass for a value.
+# so a `cmd` failure message can never pass for a value. Nor "Exception",
+# which read_live takes for cmd's failure text: such a value never reads back.
 valid_custom_value() {
   case "$1" in
-    '' | *[!A-Za-z0-9._,:+-]*) return 1 ;;
+    '' | *[!A-Za-z0-9._,:+-]* | *Exception*) return 1 ;;
   esac
   [ "${#1}" -le 92 ]
 }

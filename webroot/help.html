@@ -201,7 +201,7 @@
 
   <h3>Custom tab</h3>
   <p>Keeps any other setting at the value you choose, the same way as the built-in ones. Pick the kind - <strong>global</strong>, <strong>secure</strong> or <strong>system</strong> (Android settings) or <strong>prop</strong> (only <code>persist.*</code> properties) - type the name and the value, and tap <strong>Add</strong>. The form shows the current value while you type the name.</p>
-  <p>Values use letters, digits and <code>. _ , : + -</code>, in the form Android stores them (for example <code>600000</code> for 10 minutes of <code>screen_off_timeout</code>). <code>null</code> keeps a setting deleted. Adding the same name again changes the value; <strong>remove</strong> stops managing it and leaves it as it is. Up to 32 entries.</p>
+  <p>Values use letters, digits and <code>. _ , : + -</code> (not containing <code>Exception</code>, which reads as an Android error), in the form Android stores them (for example <code>600000</code> for 10 minutes of <code>screen_off_timeout</code>). <code>null</code> keeps a setting deleted. Adding the same name again changes the value; <strong>remove</strong> stops managing it and leaves it as it is. Up to 32 entries.</p>
   <p>The value from right before the first change is saved, so Restore Original and uninstall put it back. <strong>system</strong> settings get the same cooldown as secure ones: HyperOS rewrites both files every few seconds.</p>
 
   <h3>Xiaomi-specific</h3>

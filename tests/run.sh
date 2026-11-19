@@ -420,6 +420,29 @@ while [ -d "$DOP_DATA_DIR" ] && [ "$_i" -lt 50 ]; do
   _i=$((_i + 1))
 done
 
+# A custom value holding "Exception" reads back as cmd's failure text, so it
+# is refused; one already stored is ignored without breaking the rest.
+newcase exception-value
+OUT=$(svc --custom-add system example_mode Exception)
+check "--custom-add value Exception: refused" eval 'outhas error=bad-value && outhas rc=1 && test ! -s "$DOP_DATA_DIR/custom"'
+OUT=$(svc --custom-add system example_mode ExampleException1)
+check "--custom-add value containing Exception: refused" eval 'outhas error=bad-value && outhas rc=1'
+OUT=$(svc --custom-add system example_mode except.ion-1)
+check "--custom-add ordinary value: accepted" eval 'outhas rc=0 && has "$DOP_DATA_DIR/custom" "c1 system example_mode except.ion-1"'
+mkdir -p "$DOP_EXPORT_DIR"
+printf 'custom=system example_other Exception\ncustom=system example_third 7\n' >"$DOP_EXPORT_DIR/example.txt"
+OUT=$(svc --import example.txt)
+check "--import custom value Exception: skipped, the valid line added" eval 'outhas skipped=1 && outhas changed=1 && ! grep -q Exception "$DOP_DATA_DIR/custom"'
+newcase exception-stored
+mkdir -p "$DOP_DATA_DIR"
+printf 'c1 system example_mode Exception\nc2 system example_ok 5\n' >"$DOP_DATA_DIR/custom"
+OUT=$(svc --status)
+check "stored custom value Exception: --status rc=0, the line ignored, the next one kept" eval 'outhas rc=0 && outhas "CUSTOM_KEYS=c2"'
+OUT=$(MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; ensure_config; load_config; ensure_touched; capture_originals; echo "keys=$CUSTOM_KEYS"' 2>&1)
+check "stored custom value Exception: boot steps run, c2 still managed" outhas "keys=c2"
+svc --custom-add system example_new 1 >/dev/null
+check "stored custom value Exception: dropped from the file by the next custom write" eval '! grep -q "^c1 " "$DOP_DATA_DIR/custom" && has "$DOP_DATA_DIR/custom" "c2 system example_ok 5"'
+
 newcase backup
 svc --config adb_enabled 1 >/dev/null
 OUT=$(svc --export)
