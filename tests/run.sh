@@ -337,6 +337,19 @@ echo adb_enabled=0 >"$DOP_DATA_DIR/original"
 limited 0 common 'ensure_touched'
 check "write failure: ensure_touched leaves no empty managed list" test ! -e "$DOP_DATA_DIR/managed"
 
+# A hand-edited config may end without a newline: a setting that
+# ensure_config adds must not join that last line.
+newcase nonewline
+mkdir -p "$DOP_DATA_DIR"
+printf 'adb_enabled=1\nprofile=balanced\nlog_level=1\nmock_location_app=skip\nadbinput=0' >"$DOP_DATA_DIR/config"
+OUT=$(common 'ensure_config; load_config; echo "adbinput=$CFG_adbinput engine=$CFG_engine bad=$CFG_BAD"' 2>&1)
+check "config without a final newline: last value kept by ensure_config" outhas "adbinput=0 engine=auto bad="
+check "config without a final newline: missing setting added on its own line" has "$DOP_DATA_DIR/config" engine=auto
+printf 'adb_enabled=1\nprofile=balanced\nlog_level=1\nmock_location_app=skip\nengine=poll\n' >"$DOP_DATA_DIR/config"
+cp "$DOP_DATA_DIR/config" "$C/config.before"
+common 'ensure_config' >/dev/null 2>&1
+check "complete config with a final newline: ensure_config leaves it byte for byte" cmp -s "$C/config.before" "$DOP_DATA_DIR/config"
+
 newcase backup
 svc --config adb_enabled 1 >/dev/null
 OUT=$(svc --export)

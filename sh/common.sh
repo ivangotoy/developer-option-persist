@@ -870,6 +870,9 @@ ensure_config() {
     write_default_config
     return 0
   fi
+  # A hand-edited file may end without a newline: a line added below would
+  # join its last line and make that value invalid.
+  [ -n "$(tail -c 1 "$CONFIG_FILE" 2>/dev/null)" ] && echo >>"$CONFIG_FILE"
   grep -q '^profile=' "$CONFIG_FILE" || echo "profile=balanced" >>"$CONFIG_FILE"
   grep -q '^log_level=' "$CONFIG_FILE" || echo "log_level=1" >>"$CONFIG_FILE"
   grep -q '^engine=' "$CONFIG_FILE" || echo "engine=auto" >>"$CONFIG_FILE"
