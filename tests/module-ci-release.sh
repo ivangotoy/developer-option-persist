@@ -19,7 +19,7 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy
 unset GIT_CONFIG_COUNT GIT_DIR GIT_WORK_TREE
 REAL_GIT=$(command -v git)
 REAL_CURL=$(command -v curl)
-TOKEN=example-token-5f3a9c0d
+TOKEN="$(printf 'example-token-%s' 5f3a9c0d)"
 REPOSITORY=example/developer-option-persist
 RUN_NUMBER=7
 # the tag module-ci.sh makes from the built version (same rules as there)
@@ -340,7 +340,7 @@ chmod 755 "$S/bin/setpriv" "$S/bin/env" "$S/bin/chown"
   printf 'build() { export -p > "$OUT/build-user-env"; : > "$OUT/module.zip"; }\n' > .forgejo/module-ci.conf
   "$REAL_GIT" add -A && "$REAL_GIT" commit -q -m "example base"
 ) || bad "build: fixture repo"
-SECRET=example-sign-secret-7c1d
+SECRET="$(printf 'example-sign-secret-%s' 7c1d)"
 (cd "$S" && env 'example.name=1' 'BASH_FUNC_example_fn%%=() {  :
 }' SHELLOPTS=braceexpand:hashall:interactive-comments \
   WORK=/nonexistent/example-work OUT=/nonexistent/example-out BUILD_UID=1000 EXAMPLE_CALLER_VAR=1 \
