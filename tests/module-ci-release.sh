@@ -259,4 +259,41 @@ check "dispatch of a commit not on main: exits non-zero" [ "$RC" != 0 ]
 check "dispatch of a commit not on main: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
 check "dispatch of a commit not on main: says why" grep -q "not in main" "$S/out"
 
+# ---------- stalled upstream fetch ----------
+# The upstream is a 127.0.0.1 listener that accepts and never answers. module-ci.sh supplies
+# the low-speed limit; this run shortens only the time (no limit set here or in git config),
+# so the build step's fetch must fail on its own instead of hanging until the job timeout.
+# setpriv is a stub that refuses: should the build ever get past the fetch, its uid switch
+# and its `kill -9 -1` as the build user never run on this machine.
+
+S="$W/stall"
+mkdir -p "$S/src" "$S/home" "$S/bin"
+printf '#!/bin/sh\necho "setpriv stub: refused" >&2\nexit 1\n' > "$S/bin/setpriv"
+chmod 755 "$S/bin/setpriv"
+export HOME="$S/home" GIT_CONFIG_GLOBAL="$S/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = Example Dev\n\temail = dev@example.invalid\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
+python3 -I -c 'import os, socket, sys
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(8)
+open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1])); os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+held = []
+while True: held.append(s.accept()[0])' "$S/port" &
+SERVER_PID=$!
+for _ in $(seq 100); do [ -f "$S/port" ] && break; sleep 0.1; done
+(
+  set -e
+  cd "$S/src"
+  "$REAL_GIT" init -q
+  mkdir .forgejo
+  printf 'UPSTREAM_URL=http://127.0.0.1:%s/upstream.git\nUPSTREAM_BRANCH=main\nbuild() { :; }\n' "$(cat "$S/port")" > .forgejo/module-ci.conf
+  "$REAL_GIT" add -A && "$REAL_GIT" commit -q -m "example base"
+) || bad "stall: fixture repo"
+start=$SECONDS
+(cd "$S" && PATH="$S/bin:$PATH" env -u GIT_HTTP_LOW_SPEED_LIMIT GIT_HTTP_LOW_SPEED_TIME=3 SERVER_URL=http://127.0.0.1:1 \
+  REPOSITORY="$REPOSITORY" BASE_SHA="$("$REAL_GIT" -C "$S/src" rev-parse HEAD)" \
+  timeout 30 bash "$REPO/.forgejo/module-ci.sh" build "$S/src") > "$S/out" 2>&1
+RC=$? took=$((SECONDS - start))
+kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""
+check "stalled upstream fetch: build fails on its own, not by the 30 s timeout (rc $RC, ${took}s)" bash -c '[ "$1" != 0 ] && [ "$1" != 124 ] && [ "$2" -lt 20 ]' _ "$RC" "$took"
+check "stalled upstream fetch: git reports the low-speed abort" grep -q "Operation too slow" "$S/out"
+
 exit 0
