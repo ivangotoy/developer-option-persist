@@ -164,6 +164,28 @@ wf_curl_bounded() {
   return 0
 }
 check "workflow: every curl has --connect-timeout and --max-time" wf_curl_bounded
+# Every step that runs git clone or git fetch (before module-ci.sh sets them)
+# has the git low-speed bound in its environment.
+wf_git_bounded() {
+  python3 -I - "$REPO/.forgejo/workflows/module-release.yml" <<'PY'
+import re, sys, yaml
+n = 0
+for job in yaml.safe_load(open(sys.argv[1]))["jobs"].values():
+    for st in job.get("steps", []):
+        lines = [l for l in str(st.get("run", "")).splitlines() if not l.strip().startswith("#")]
+        if any(re.search(r"\bgit (clone|fetch)\b", l) for l in lines):
+            n += 1
+            env = st.get("env") or {}
+            if not all(str(env.get(k, "")).strip() for k in ("GIT_HTTP_LOW_SPEED_LIMIT", "GIT_HTTP_LOW_SPEED_TIME")):
+                sys.exit("step without the git low-speed bound: " + st.get("name", "?"))
+sys.exit(0 if n else "no git clone found")
+PY
+}
+if command -v python3 >/dev/null 2>&1 && python3 -I -c 'import yaml' 2>/dev/null; then
+  check "workflow: every step with git clone or fetch sets GIT_HTTP_LOW_SPEED_LIMIT and _TIME" wf_git_bounded
+else
+  skip "workflow git low-speed check (no python3 yaml)"
+fi
 
 # -- Module behaviour --
 newcase enforce
