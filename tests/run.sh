@@ -154,6 +154,17 @@ zip_paths_ok() {
 }
 check "module-ci.conf pack_paths leave out tests/" zip_paths_ok
 
+# A stalled forge must fail the workflow's own curl calls, not hold the job
+# until its timeout.
+wf_curl_bounded() {
+  _wf="$REPO/.forgejo/workflows/module-release.yml"
+  grep 'curl ' "$_wf" | grep -v '^ *#' | grep -q . || return 1
+  grep 'curl ' "$_wf" | grep -v '^ *#' | grep -v -e '--connect-timeout' | grep -q . && return 1
+  grep 'curl ' "$_wf" | grep -v '^ *#' | grep -v -e '--max-time' | grep -q . && return 1
+  return 0
+}
+check "workflow: every curl has --connect-timeout and --max-time" wf_curl_bounded
+
 # -- Module behaviour --
 newcase enforce
 OUT=$(svc --config adb_enabled 1)
