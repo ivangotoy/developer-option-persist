@@ -815,15 +815,15 @@ lock_acquire() { # lock_acquire <dir> <seconds>
     _lk_o=""
     [ -f "$1/pid" ] && read -r _lk_o <"$1/pid" 2>/dev/null
     if [ -n "$_lk_o" ]; then
+      _lk_empty=0
       if ! pid_alive "$_lk_o"; then
-        rm -rf "$1" 2>/dev/null
-        continue
+        lock_takeover "$1" && break
       fi
     else
       _lk_empty=$((_lk_empty + 1))
       if [ "$_lk_empty" -ge 3 ]; then
-        rm -rf "$1" 2>/dev/null
-        continue
+        _lk_empty=0
+        lock_takeover "$1" empty && break
       fi
     fi
     [ "$_lk_t" -le 0 ] && {
@@ -839,6 +839,35 @@ lock_acquire() { # lock_acquire <dir> <seconds>
 }
 
 lock_release() { rm -rf "$1" 2>/dev/null; return 0; }
+
+# lock_takeover <dir> [empty] - takes over a lock whose owner is gone (with
+# "empty": that has no owner written). Two waiters that both saw the dead
+# owner must not both remove the lock: the second would remove the first
+# one's fresh lock. So only the holder of <dir>.takeover (mkdir is atomic)
+# removes a lock, after reading its owner once more, and it writes its own
+# pid into the new lock before it lets the guard go: the next guard holder
+# sees a live owner and leaves it. The guard is an empty directory only its
+# holder removes; a process killed inside leaves it until boot clears
+# LOCK_DIR, and that lock then waits for its owner instead of a takeover.
+# Returns 0 when the caller now holds the lock.
+lock_takeover() {
+  mkdir "$1.takeover" 2>/dev/null || return 1
+  _lt_o=""
+  [ -f "$1/pid" ] && read -r _lt_o <"$1/pid" 2>/dev/null
+  if [ -n "$_lt_o" ]; then
+    pid_alive "$_lt_o" || rm -rf "$1" 2>/dev/null
+  elif [ "$2" = empty ]; then
+    rm -rf "$1" 2>/dev/null
+  fi
+  _lt_rc=1
+  if mkdir "$1" 2>/dev/null; then
+    echo "$$" >"$1/pid" 2>/dev/null
+    _lt_rc=0
+  fi
+  rmdir "$1.takeover" 2>/dev/null
+  unset _lt_o
+  return "$_lt_rc"
+}
 
 # ── Config ────────────────────────────────────────────────────────────────────
 write_default_config() {

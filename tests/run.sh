@@ -248,6 +248,54 @@ check "--restore with the apply lock busy: nothing restored" test "$(sget global
 kill "$_holder" 2>/dev/null
 wait "$_holder" 2>/dev/null
 
+# Stale-lock takeover. Waiter B finds the lock of a dead process; before B
+# acts, waiter A (a live process) takes the same stale lock over. B must
+# not remove A's fresh lock: A keeps it and B gets nothing. The interleaving
+# is fixed by B's pid_alive, which runs A to completion when it is asked
+# about the dead pid.
+newcase lock-takeover
+L="$DOP_DATA_DIR/run/locks/example"
+mkdir -p "$L"
+_dead=$(sh -c 'echo $$')
+echo "$_dead" >"$L/pid"
+OUT=$(MODDIR="$M" DEAD="$_dead" L="$L" C="$C" sh -c '. "$MODDIR/sh/common.sh"
+pid_alive() {
+  if [ "$1" = "$DEAD" ]; then
+    if [ ! -f "$C/hook" ]; then
+      : >"$C/hook"
+      sh -c ". \"$MODDIR/sh/common.sh\"; lock_acquire \"$L\" 0 && echo \$\$ >\"$C/a.ready\"; exec sleep 30" >/dev/null 2>&1 &
+      _w=0
+      while [ ! -s "$C/a.ready" ] && [ "$_w" -lt 300 ]; do sleep 0.1; _w=$((_w + 1)); done
+    fi
+    return 1
+  fi
+  [ -r "/proc/$1/stat" ]
+}
+lock_acquire "$L" 0
+echo "b_rc=$?"' 2>&1)
+_a=$(cat "$C/a.ready" 2>/dev/null)
+check "stale lock, two waiters: the first one took it over" test -n "$_a"
+check "stale lock, two waiters: the second one does not get it" outhas b_rc=1
+check "stale lock, two waiters: the lock still names the first one" has "$L/pid" "$_a"
+check "stale lock, two waiters: no takeover guard left" test ! -e "$L.takeover"
+[ -n "$_a" ] && kill "$_a" 2>/dev/null
+newcase lock-stale
+L="$DOP_DATA_DIR/run/locks/example"
+mkdir -p "$L"
+_dead=$(sh -c 'echo $$')
+echo "$_dead" >"$L/pid"
+OUT=$(MODDIR="$M" L="$L" sh -c '. "$MODDIR/sh/common.sh"; lock_acquire "$L" 0; echo "rc=$?"; echo "me=$$"' 2>&1)
+check "stale lock, one waiter: taken over at once" eval 'outhas rc=0 && has "$L/pid" "$(printf "%s\n" "$OUT" | sed -n "s/^me=//p")"'
+rm -rf "$L"
+mkdir -p "$L"
+OUT=$(MODDIR="$M" L="$L" sh -c '. "$MODDIR/sh/common.sh"; lock_acquire "$L" 5; echo "rc=$?"; echo "me=$$"' 2>&1)
+check "lock without an owner: taken over after three looks" eval 'outhas rc=0 && has "$L/pid" "$(printf "%s\n" "$OUT" | sed -n "s/^me=//p")"'
+rm -rf "$L"
+mkdir -p "$L" "$L.takeover"
+echo "$_dead" >"$L/pid"
+OUT=$(MODDIR="$M" L="$L" sh -c '. "$MODDIR/sh/common.sh"; lock_acquire "$L" 0; echo "rc=$?"' 2>&1)
+check "stale lock while a takeover guard exists: left alone" eval 'outhas rc=1 && has "$L/pid" "$_dead"'
+
 newcase custom
 OUT=$(svc --custom-add system screen_off_timeout 600000)
 check "--custom-add: rc=0 id=c1" eval 'outhas rc=0 && outhas id=c1'
