@@ -840,10 +840,11 @@ cmd_import() {
     esac
   done
   for _ci_p in $_ci_cust; do
-    _ci_kind=${_ci_p%%|*}
-    _ci_v=${_ci_p##*|}
-    _ci_t=${_ci_p#*|}
-    _ci_t=${_ci_t%|*}
+    # "|" quoted: unquoted, mksh reads it as a pattern alternative.
+    _ci_kind=${_ci_p%%"|"*}
+    _ci_v=${_ci_p##*"|"}
+    _ci_t=${_ci_p#*"|"}
+    _ci_t=${_ci_t%"|"*}
     load_config
     _ci_have=0
     for _ci_k in $CUSTOM_KEYS; do
