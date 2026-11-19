@@ -1370,7 +1370,7 @@ async function doAction(type) {
       out = parseKV(await svc('--snapshot', 30000));
       showToast(out.rc === '0'
         ? (out.snapped === '0' ? 'Nothing to snapshot yet' : 'New snapshot · ' + out.snapped + ' value(s)')
-        : 'Snapshot failed (busy, try again)',
+        : (out.error === 'busy' ? 'Snapshot failed (busy, try again)' : 'Snapshot failed (could not save)'),
                 out.rc === '0' ? 'ok' : 'err');
     } else if (type === 'restore') {
       out = parseKV(await svc('--restore', 60000));
