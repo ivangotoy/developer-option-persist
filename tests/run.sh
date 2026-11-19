@@ -70,7 +70,10 @@ cat >"$B/appops" <<'EOF'
 A="$FAKE/appops"
 mkdir -p "$A"
 case "$1" in
-  query-op) for f in "$A"/*; do [ -f "$f" ] && echo "${f##*/}"; done; exit 0 ;;
+  query-op)
+    # appops-out: a canned answer (an error text) instead of the holders
+    if [ -f "$FAKE/appops-out" ]; then cat "$FAKE/appops-out"; exit 0; fi
+    for f in "$A"/*; do [ -f "$f" ] && echo "${f##*/}"; done; exit 0 ;;
   set) if [ "$4" = allow ]; then : >"$A/$2"; else rm -f "$A/$2"; fi ;;
   get) if [ -f "$FAKE/pkgs/$2" ]; then echo "MOCK_LOCATION: default"; else echo "Error: No UID for $2"; fi ;;
 esac
@@ -349,6 +352,40 @@ printf 'adb_enabled=1\nprofile=balanced\nlog_level=1\nmock_location_app=skip\nen
 cp "$DOP_DATA_DIR/config" "$C/config.before"
 common 'ensure_config' >/dev/null 2>&1
 check "complete config with a final newline: ensure_config leaves it byte for byte" cmp -s "$C/config.before" "$DOP_DATA_DIR/config"
+
+# A package name holding "rror" (com.example.mirror) is a holder, not
+# appops error text; real error answers still read as unreadable.
+newcase mirror
+: >"$FAKE/pkgs/com.example.mirror"
+svc --config mock_location_app com.example.mirror >/dev/null
+OUT=$(svc --status)
+check "mock app com.example.mirror: read back and matching" eval 'outhas LIVE_mock_location_app=com.example.mirror && outhas MATCH_mock_location_app=1'
+holders() { common 'if mock_holders; then echo "holders=$MOCK"; else echo holders=fail; fi' 2>&1; }
+printf 'Error: Unknown operation string: android:mock_location\n' >"$FAKE/appops-out"
+check "appops answer 'Error: ...': unreadable" test "$(holders)" = holders=fail
+printf 'cmd: Failure calling service appops: Failed transaction (2147483646)\n' >"$FAKE/appops-out"
+check "appops answer 'Failure calling service': unreadable" test "$(holders)" = holders=fail
+printf 'Exception occurred while executing query-op:\njava.lang.IllegalStateException\n\tat com.android.server.appop.AppOpsService.onShellCommand(AppOpsService.java:1)\n' >"$FAKE/appops-out"
+check "appops answer with an exception trace: unreadable" test "$(holders)" = holders=fail
+printf 'java.lang.OutOfMemoryError\n' >"$FAKE/appops-out"
+check "appops answer naming a java Error: unreadable" test "$(holders)" = holders=fail
+printf 'No operations.\n' >"$FAKE/appops-out"
+check "appops answer 'No operations.': no holder" test "$(holders)" = holders=none
+rm -f "$FAKE/appops-out"
+newcase mirror-uninstall
+mkdir -p "$DOP_DATA_DIR" "$FAKE/appops"
+: >"$FAKE/pkgs/com.example.mirror"
+: >"$FAKE/pkgs/com.example.other"
+: >"$FAKE/appops/com.example.mirror"
+echo mock_location_app=com.example.other >"$DOP_DATA_DIR/original"
+echo mock_location_app >"$DOP_DATA_DIR/managed"
+sh "$M/uninstall.sh" >/dev/null 2>&1
+check "uninstall.sh with com.example.mirror holding the app op: original app back" eval 'test -f "$FAKE/appops/com.example.other" && test ! -f "$FAKE/appops/com.example.mirror"'
+_i=0
+while [ -d "$DOP_DATA_DIR" ] && [ "$_i" -lt 50 ]; do
+  sleep 0.2
+  _i=$((_i + 1))
+done
 
 newcase backup
 svc --config adb_enabled 1 >/dev/null

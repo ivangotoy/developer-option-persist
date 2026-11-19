@@ -320,10 +320,20 @@ key_want() {
 mock_holders() {
   _mh_out=$(appops query-op android:mock_location allow 2>&1)
   case "$_mh_out" in
-    *Failure* | *Exception* | *rror*)
+    *Failure* | *Exception*)
       unset _mh_out
       return 1 ;;
   esac
+  # "rror" is error text only outside a package name (com.example.mirror).
+  for _mh_p in $_mh_out; do
+    case "$_mh_p" in
+      *Error) ;;
+      *rror*) valid_pkg "$_mh_p" && continue ;;
+      *) continue ;;
+    esac
+    unset _mh_out _mh_p
+    return 1
+  done
   MOCK=""
   for _mh_p in $_mh_out; do
     valid_pkg "$_mh_p" && MOCK="${MOCK:+$MOCK,}$_mh_p"
