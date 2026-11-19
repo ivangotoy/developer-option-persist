@@ -90,9 +90,12 @@ scenario() {
     RUN_BASE=$("$REAL_GIT" -C "$S/seed" rev-parse up)
   fi
 
-  # what the build step leaves in .ci-out (module-ci.sh build, without the uid switch)
+  # what the build step leaves in .ci-out (module-ci.sh build, without the uid switch).
+  # GIT_ALLOW_PROTOCOL=file here and in the release run: a URL no insteadOf maps fails
+  # instead of reaching the network
   (
     set -e
+    export GIT_ALLOW_PROTOCOL=file
     "$REAL_GIT" clone -q "file://$S/origin.git" "$S/src"
     cd "$S/src"
     "$REAL_GIT" checkout -q -B main "$BASE"
@@ -127,7 +130,7 @@ PY
   SERVER_URL="http://127.0.0.1:$(cat "$S/port")"
   printf '[url "file://%s/origin.git"]\n\tinsteadOf = %s/%s.git\n' "$S" "$SERVER_URL" "$REPOSITORY" >> "$GIT_CONFIG_GLOBAL"
 
-  (cd "$S" && PATH="$W/bin:$PATH" TMPDIR="$S/tmp" MCI_LOG="$S/log" SERVER_URL="$SERVER_URL" \
+  (cd "$S" && GIT_ALLOW_PROTOCOL=file PATH="$W/bin:$PATH" TMPDIR="$S/tmp" MCI_LOG="$S/log" SERVER_URL="$SERVER_URL" \
     REPOSITORY="$REPOSITORY" BASE_SHA="$RUN_BASE" RELEASE_TOKEN="$TOKEN" RUN_NUMBER="$RUN_NUMBER" \
     bash "$REPO/.forgejo/module-ci.sh" release "$S/src") > "$S/out" 2>&1
   RC=$?
