@@ -364,4 +364,18 @@ check "build step: signing secret in no env or setpriv argv" bash -c '[ -s "$1" 
 check "build step: build() keeps the caller's git low-speed time, gets the default limit" bash -c 'grep -qx "declare -x GIT_HTTP_LOW_SPEED_TIME=\"7\"" "$1" && grep -qx "declare -x GIT_HTTP_LOW_SPEED_LIMIT=\"1024\"" "$1"' _ "$S/src/.ci-out/build-user-env"
 check "build step: the build user's kill -9 -1 reached only the recording stub" grep -qx "kill -9 -1" "$S/setpriv-refused"
 
+# a failed build: whatever the build user started is killed before the script stops
+F="$W/build-failed"
+mkdir -p "$F/src/.forgejo"
+cp "$REPO/.forgejo/module-ci.sh" "$F/src/.forgejo/"
+printf 'build() { echo "example build failure" >&2; return 1; }\n' > "$F/src/.forgejo/module-ci.conf"
+( cd "$F/src" && "$REAL_GIT" init -q && "$REAL_GIT" add -A && "$REAL_GIT" commit -q -m "example base" ) || bad "build failed: fixture repo"
+: > "$S/setpriv-refused"
+(cd "$F" && env -u WORK -u OUT -u BUILD_UID PATH="$S/bin:$PATH" SERVER_URL=http://127.0.0.1:1 \
+  REPOSITORY="$REPOSITORY" BASE_SHA="$("$REAL_GIT" -C "$F/src" rev-parse HEAD)" \
+  timeout 60 bash "$REPO/.forgejo/module-ci.sh" build "$F/src") > "$F/out" 2>&1
+RC=$?
+check "build step, failed build: exits non-zero with the build's error" bash -c '[ "$1" != 0 ] && grep -q "example build failure" "$2" && ! grep -q "unbound variable" "$2"' _ "$RC" "$F/out"
+check "build step, failed build: the build user's kill -9 -1 still reached the recording stub" grep -qx "kill -9 -1" "$S/setpriv-refused"
+
 exit 0
