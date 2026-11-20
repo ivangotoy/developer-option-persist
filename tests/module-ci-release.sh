@@ -242,6 +242,14 @@ check "publish reply lost: exits non-zero" [ "$RC" != 0 ]
 check "publish reply lost: release state read before the cleanup" grep -qx "GET $A/releases/1 auth" "$S/calls"
 check "publish reply lost: published release not deleted" not grep -q "^DELETE " "$S/calls"
 
+# ---------- draft created by the forge, reply lost ----------
+
+scenario fail-draft-lost "" "" draft-lost
+check "draft reply lost: exits non-zero" [ "$RC" != 0 ]
+check "draft reply lost: one draft request, nothing deleted or published" bash -c '[ "$(grep -c "^POST $1/releases auth$" "$2")" = 1 ] && ! grep -q "^DELETE \|^PATCH " "$2"' _ "$A" "$S/calls"
+check "draft reply lost: tag logged for a check by hand" grep -qF "the draft request for $TAG failed or its reply was lost" "$S/out"
+check "draft reply lost: no unbound variable" not grep -q "unbound variable" "$S/out"
+
 # ---------- fork-owned module.prop kept at the released version ----------
 
 scenario sync "SYNC_ROOT_PROP=module.prop" "" ""

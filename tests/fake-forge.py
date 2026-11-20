@@ -5,7 +5,8 @@ routes that .forgejo/module-ci.sh release uses, on 127.0.0.1.
 
 Every request is logged as one JSON line (method, path, Authorization header,
 body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the publish PATCH,
-=publish-lost applies the publish PATCH and then answers 500 (a lost reply).
+=publish-lost applies the publish PATCH and then answers 500 (a lost reply),
+=draft-lost creates the draft release and then answers 500.
 """
 import json
 import os
@@ -70,6 +71,8 @@ class Handler(BaseHTTPRequestHandler):
             next_id[0] += 1
             releases[rid] = {"id": rid, "tag": req["tag_name"], "target": req["target_commitish"],
                              "draft": req["draft"], "name": req["name"], "body": req["body"]}
+            if FAIL == "draft-lost":
+                return self.reply(500, {"message": "forced failure after the change"})
             return self.reply(201, {"id": rid})
         parts = p[len(API):].split("/") if p.startswith(API + "/releases/") else []
         if len(parts) == 4 and parts[3] == "assets" and m == "POST":
