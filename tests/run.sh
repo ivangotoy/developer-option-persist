@@ -7,15 +7,16 @@
 # POSIX sh (bash as sh, dash, busybox ash). The module scripts run for real
 # against PATH stubs of the Android tools (settings, getprop, setprop, appops,
 # pm, dumpsys) that keep their state in files, a module copy and a data
-# directory (DOP_DATA_DIR) in a scratch directory under TMPDIR. Nothing here
-# starts the daemon. Checks whose tool is missing (bash, python3, node) are reported
-# as skip. tests/module-ci-release.sh runs .forgejo/module-ci.sh release
+# directory (DOP_DATA_DIR) in a scratch directory under TMPDIR. One case starts
+# the daemon (event engine, a stand-in inotifyd) and stops it with --restore.
+# Checks whose tool is missing (bash, python3, node) are reported as skip. tests/module-ci-release.sh runs .forgejo/module-ci.sh release
 # against a fake forge (tests/fake-forge.py). tests/webui-toasts.js checks the WebUI's
 # toasts under node. tests/ is not packed into the module zip (.forgejo/module-ci.conf).
 
 REPO=$(cd "$(dirname "$0")/.." && pwd) || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/dop-tests.XXXXXX") || exit 1
-trap 'rm -rf "$W"' EXIT
+_bg="" # pids of a daemon case, killed if the run ends early
+trap '[ -z "$_bg" ] || kill $_bg 2>/dev/null; rm -rf "$W"' EXIT
 trap 'exit 130' INT TERM
 
 PASS=0 FAIL=0 SKIP=0
@@ -544,6 +545,51 @@ OUT=$(MODDIR="$M" sh -c '. "$MODDIR/sh/common.sh"; ensure_config; load_config; e
 check "stored custom value Exception: boot steps run, c2 still managed" outhas "keys=c2"
 svc --custom-add system example_new 1 >/dev/null
 check "stored custom value Exception: dropped from the file by the next custom write" eval '! grep -q "^c1 " "$DOP_DATA_DIR/custom" && has "$DOP_DATA_DIR/custom" "c2 system example_ok 5"'
+
+# --restore while the daemon runs the event engine: the daemon waits in
+# `read -t` on the watcher's FIFO and must stop through its TERM trap
+# (watcher killed, FIFO removed, status Stopped), then the original value
+# is restored and enforcement stays paused. The watcher is a stand-in
+# inotifyd that sends nothing; the daemon watches directories of the case.
+gone() {
+  for _p in "$@"; do
+    [ -r "/proc/$_p/stat" ] || continue
+    read -r _ _ _st _ <"/proc/$_p/stat" 2>/dev/null
+    [ "$_st" = Z ] || return 1
+  done
+  return 0
+}
+if [ "$(id -u)" = 0 ]; then
+  skip "--restore with the event engine (runs as root: daemon_detach would move this run into other cgroups)"
+elif ! printf 'x\n' | sh -c 'read -t 1 _v 2>/dev/null && [ "$_v" = x ]' 2>/dev/null; then
+  skip "--restore with the event engine (this sh has no read -t)"
+else
+  newcase events-restore
+  svc --config adb_enabled 1 >/dev/null
+  mkdir -p "$C/sys" "$C/prop"
+  printf '#!/bin/sh\nwhile :; do sleep 1; done\n' >"$C/inotifyd"
+  sh -c '_i=$1 _s=$2 _p=$3; set -- --status; . "$0" >/dev/null; CMD_INOTIFYD="sh $_i"; SETTINGS_DIR=$_s; PROP_DIR=$_p; daemon_main' \
+    "$M/service.sh" "$C/inotifyd" "$C/sys" "$C/prop" >/dev/null 2>&1 &
+  _dp=$!
+  _bg=$_dp
+  _i=0
+  while ! grep -q '^MODE=events' "$DOP_DATA_DIR/run/state" 2>/dev/null && [ "$_i" -lt 50 ]; do
+    sleep 0.2
+    _i=$((_i + 1))
+  done
+  _wp=$(cat "$DOP_DATA_DIR/run/watcher.pid" 2>/dev/null)
+  _bg="$_dp $_wp"
+  check "event engine running before --restore" eval 'grep -q "^MODE=events" "$DOP_DATA_DIR/run/state" && test -n "$_wp"'
+  OUT=$(svc --restore)
+  check "--restore with the event engine: rc=0 restored=1 paused=1" eval 'outhas rc=0 && outhas restored=1 && outhas paused=1'
+  check "--restore with the event engine: adb_enabled back to 0" test "$(sget global adb_enabled)" = 0
+  check "--restore with the event engine: daemon stopped through its TERM trap" grep -q "Daemon stopping (pid $_dp)" "$DOP_DATA_DIR/logs/service.log"
+  check "--restore with the event engine: no daemon or watcher left" gone $_dp $_wp
+  check "--restore with the event engine: FIFO removed, status Stopped" eval 'test ! -e "$DOP_DATA_DIR/run/events" && grep -q "^description=.* - Stopped$" "$M/module.prop"'
+  kill $_bg 2>/dev/null
+  wait "$_dp" 2>/dev/null
+  _bg=""
+fi
 
 newcase backup
 svc --config adb_enabled 1 >/dev/null
