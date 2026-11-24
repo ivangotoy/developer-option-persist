@@ -1,6 +1,6 @@
 {
-  "version": "v9-ci5",
-  "versionCode": 13,
-  "zipUrl": "https://git.digtvbg.com/ivangotoy/developer-option-persist/releases/download/v9-ci5/developer-option-persist-v9-ci5.zip",
-  "changelog": "https://git.digtvbg.com/ivangotoy/developer-option-persist/raw/commit/d5223478dbaa4891beee45c3a250357c323c5872/CHANGELOG.md"
+  "version": "v11-ci6",
+  "versionCode": 15,
+  "zipUrl": "https://git.digtvbg.com/ivangotoy/developer-option-persist/releases/download/v11-ci6/developer-option-persist-v11-ci6.zip",
+  "changelog": "https://git.digtvbg.com/ivangotoy/developer-option-persist/raw/commit/da9fafb5f7ee465777a24ef8698c8bb04768597b/CHANGELOG.md"
 }
