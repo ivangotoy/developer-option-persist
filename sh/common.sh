@@ -1542,7 +1542,6 @@ mock_scan() {
   fi
 
   _ms_tmp="$MOCK_CACHE.tmp.$$"
-  _ms_new=0
   : >"$_ms_tmp"
   # Lines look like "package:com.example versionCode:123".
   printf '%s\n' "$_ms_list" | while read -r _ms_a _ms_b; do
@@ -1576,7 +1575,7 @@ mock_scan() {
   fi
   rm -f "$_ms_tmp" 2>/dev/null
   rm -rf "$MOCK_SCAN_LOCK"
-  unset _ms_stamp _ms_list _ms_tmp _ms_new _ms_o
+  unset _ms_stamp _ms_list _ms_tmp _ms_o
   return 0
 }
 
