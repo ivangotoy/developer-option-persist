@@ -584,6 +584,7 @@ cmd_apply() {
   load_config
   check_keys "$KEYS" || {
     echo "applied=0"
+    echo "error=busy"
     echo "rc=1"
     return 1
   }

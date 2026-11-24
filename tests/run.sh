@@ -8,9 +8,10 @@
 # against PATH stubs of the Android tools (settings, getprop, setprop, appops,
 # pm, dumpsys) that keep their state in files, a module copy and a data
 # directory (DOP_DATA_DIR) in a scratch directory under TMPDIR. Nothing here
-# starts the daemon. Checks whose tool is missing (bash, python3) are reported
+# starts the daemon. Checks whose tool is missing (bash, python3, node) are reported
 # as skip. tests/module-ci-release.sh runs .forgejo/module-ci.sh release
-# against a fake forge (tests/fake-forge.py). tests/ is not packed into the module zip (.forgejo/module-ci.conf).
+# against a fake forge (tests/fake-forge.py). tests/webui-toasts.js checks the WebUI's
+# toasts under node. tests/ is not packed into the module zip (.forgejo/module-ci.conf).
 
 REPO=$(cd "$(dirname "$0")/.." && pwd) || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/dop-tests.XXXXXX") || exit 1
@@ -245,6 +246,8 @@ OUT=$(svc --restore)
 check "--restore with the apply lock busy: rc=1 error=busy" eval 'outhas rc=1 && outhas error=busy'
 check "--restore with the apply lock busy: lock left to its owner" has "$DOP_DATA_DIR/run/locks/apply/pid" "$_holder"
 check "--restore with the apply lock busy: nothing restored" test "$(sget global adb_enabled)" = 1
+OUT=$(svc --apply)
+check "--apply with the apply lock busy: rc=1 error=busy" eval 'outhas rc=1 && outhas error=busy'
 kill "$_holder" 2>/dev/null
 wait "$_holder" 2>/dev/null
 
@@ -588,6 +591,26 @@ if command -v bash >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 &&
   fi
 else
   skip "module-ci release harness (needs bash, python3, git and curl)"
+fi
+
+# -- WebUI toasts for service.sh answers (tests/webui-toasts.js) --
+if command -v node >/dev/null 2>&1; then
+  node "$REPO/tests/webui-toasts.js" >"$W/ui.out" 2>&1
+  _urc=$?
+  _un=0
+  while IFS= read -r _l; do
+    case "$_l" in
+      "ok   "*) ok "webui ${_l#ok   }"; _un=$((_un + 1)) ;;
+      "FAIL "*) nok "webui ${_l#FAIL }"; _un=$((_un + 1)) ;;
+      "     "*) echo "$_l" ;;
+    esac
+  done <"$W/ui.out"
+  if [ "$_urc" != 0 ] || [ "$_un" -eq 0 ]; then
+    nok "webui toast checks exited $_urc after $_un checks"
+    tail -n 5 "$W/ui.out"
+  fi
+else
+  skip "WebUI toast checks (no node)"
 fi
 
 # the job builds the dispatched commit even when main has moved since: the steps whose run text

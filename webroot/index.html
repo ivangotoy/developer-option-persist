@@ -1357,7 +1357,9 @@ async function doAction(type) {
     var out;
     if (type === 'apply') {
       out = parseKV(await svc('--apply', 60000));
-      showToast(out.daemon === 'restarted'
+      if (out.rc !== '0') showToast(out.error === 'busy' ? 'Apply busy, try again' : 'Apply failed', 'err');
+      else if (out.daemon === 'failed') showToast('Applied · daemon failed to start', 'err');
+      else showToast(out.daemon === 'restarted'
         ? 'Applied · daemon restarted'
         : 'Applied · ' + (out.applied || '0') + ' correction(s)', 'ok');
     } else if (type === 'daemon') {
