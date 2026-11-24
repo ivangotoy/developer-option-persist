@@ -178,7 +178,6 @@ conf_offset() { local v; v=$(sed -n 's/^VERSION_CODE_OFFSET=//p' "$REPO/.forgejo
 BUILT_VC=$(sed -n 's/^versionCode=//p' "$REPO/module.prop" | head -n1)
 VC=$((BUILT_VC + $(conf_offset)))
 A=/api/v1/repos/$REPOSITORY
-FLOOR=$(sed -n 's/^VERSION_CODE_FLOOR=//p' "$REPO/.forgejo/module-ci.conf" | head -n1)
 
 # ---------- normal release ----------
 
@@ -265,10 +264,12 @@ check "SYNC_ROOT_PROP with & | spaces in the version: updateJson intact" bash -c
 
 # ---------- versionCode floor ----------
 
-scenario below-floor "VERSION_CODE_OFFSET=0" "" ""
+# the floor is pinned one above the built versionCode, so the case does not depend on module.prop
+scenario below-floor "VERSION_CODE_OFFSET=0
+VERSION_CODE_FLOOR=$((BUILT_VC + 1))" "" ""
 check "versionCode $BUILT_VC again: exits non-zero" [ "$RC" != 0 ]
 check "versionCode $BUILT_VC again: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
-check "versionCode $BUILT_VC again: says why" grep -q "versionCode $BUILT_VC is below the floor $FLOOR" "$S/out"
+check "versionCode $BUILT_VC again: says why" grep -q "versionCode $BUILT_VC is below the floor $((BUILT_VC + 1))" "$S/out"
 
 # ---------- dispatched commit not on main ----------
 
