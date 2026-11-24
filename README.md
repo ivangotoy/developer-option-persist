@@ -261,3 +261,6 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 [MIT](LICENSE)
 
+## More KernelSU modules
+
+Check out my other great KernelSU modules here: https://git.digtvbg.com/explore/repos?q=kernelsu-module&topic=1
