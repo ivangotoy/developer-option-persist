@@ -259,6 +259,9 @@ log "zip $ZIP_NAME sha256 $ZIP_SHA"
 RELEASE_ID="" PUBLISHED=0 DRAFT_REQUESTED=0 RECORDED=0 DONE=0
 cleanup() {
     rc=$?
+    # a second TERM/HUP/INT must not cut the cleanup short (draft left, header file left); the
+    # requests below stay bounded by their curl timeouts
+    trap '' TERM HUP INT
     if [ "$rc" -eq 0 ] && [ "$DONE" != 1 ]; then
         # bash runs this trap with $? = 0 when TERM or HUP (job cancel, timeout) ends the script:
         # an unfinished run is a failed one, logged before any request below can hang

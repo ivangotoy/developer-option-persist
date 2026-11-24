@@ -53,6 +53,7 @@ chmod 755 "$W/bin/curl" "$W/bin/git"
 # run_signalled SIG pid|group MARK CMD... - runs CMD in a session of its own with the default
 # signal dispositions (a background job of this script would ignore INT), sends SIG to CMD or to its
 # process group once MARK exists, and returns CMD's status (128 + signal number when it was killed).
+# With SIG2=1 the same signal goes once more when MARK.2 exists (a second signal during the cleanup).
 # Whatever CMD left in that session (a curl still in a held request) is killed afterwards.
 run_signalled() {
   python3 -I - "$@" <<'PY'
@@ -67,6 +68,11 @@ while p.poll() is None and not os.path.exists(mark) and time.time() < end:
     time.sleep(0.05)
 if p.poll() is None and os.path.exists(mark):
     (os.killpg if target == "group" else os.kill)(p.pid, sig)
+    if os.environ.get("SIG2"):
+        while p.poll() is None and not os.path.exists(mark + ".2") and time.time() < end:
+            time.sleep(0.05)
+        if p.poll() is None:
+            (os.killpg if target == "group" else os.kill)(p.pid, sig)
 try:
     rc = p.wait(timeout=60)
 except subprocess.TimeoutExpired:
@@ -164,7 +170,7 @@ PY
   SRC=$(head -n1 "$S/src/.ci-out/src")
 
   rm -f "$S/port"
-  FAKE_FORGE_FAIL="$4" FAKE_FORGE_HOLD="${HOLD:-}" FAKE_FORGE_MARK="$S/held" \
+  FAKE_FORGE_FAIL="$4" FAKE_FORGE_HOLD="${HOLD:-}" FAKE_FORGE_HOLD2="${HOLD2:-}" FAKE_FORGE_MARK="$S/held" \
     python3 -I "$REPO/tests/fake-forge.py" "$S/port" "$S/requests" "$S/origin.git" "$REPOSITORY" &
   SERVER_PID=$!
   for _ in $(seq 100); do [ -f "$S/port" ] && break; sleep 0.1; done
@@ -316,6 +322,10 @@ check "TERM during the upload: logged as interrupted" grep -qF "interrupted (tag
 check "TERM during the upload: draft deleted" grep -qx "DELETE $A/releases/1 auth" "$S/calls"
 check "TERM during the upload: nothing published" not_published
 check "TERM during the upload: header file removed" tmp_empty
+HOLD=upload HOLD2=draft-read SIG=TERM SIG2=1 scenario term-twice "" "" ""
+check "second TERM while the cleanup reads the draft state: exits non-zero" [ "$RC" != 0 ]
+check "second TERM while the cleanup reads the draft state: draft still deleted" grep -qx "DELETE $A/releases/1 auth" "$S/calls"
+check "second TERM while the cleanup reads the draft state: header file removed" tmp_empty
 HOLD=upload SIG=HUP scenario hup-upload "" "" ""
 check "HUP during the upload: exits non-zero, draft deleted" bash -c '[ "$1" != 0 ] && grep -qx "DELETE $2/releases/1 auth" "$3"' _ "$RC" "$A" "$S/calls"
 HOLD=upload SIG=INT SIG_TO=group scenario int-upload "" "" ""

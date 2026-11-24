@@ -10,6 +10,8 @@ body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the 
 read of a published release with 404. FAKE_FORGE_HOLD=draft (after creating the draft), =upload
 or =tag (the tag read of a published release) holds that request: it touches FAKE_FORGE_MARK, so
 a test can signal the release script while the request is in flight, and answers 500 after 30 s.
+FAKE_FORGE_HOLD2=draft-read holds the read of a release's draft state for 3 s (touching
+FAKE_FORGE_MARK.2) and then answers it as usual: a second signal can reach the cleanup mid-request.
 """
 import json
 import os
@@ -22,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 PORT_FILE, LOG_FILE, ORIGIN, REPO = sys.argv[1:5]
 FAIL = os.environ.get("FAKE_FORGE_FAIL", "")
 HOLD = os.environ.get("FAKE_FORGE_HOLD", "")
+HOLD2 = os.environ.get("FAKE_FORGE_HOLD2", "")
 API = f"/api/v1/repos/{REPO}"
 releases = {}
 assets = {}
@@ -106,6 +109,9 @@ class Handler(BaseHTTPRequestHandler):
             tag = releases[a["release"]]["tag"]
             return self.reply(200, {"id": int(parts[4]), "browser_download_url": f"{base}/{REPO}/releases/download/{tag}/{a['name']}"})
         if len(parts) == 3 and m == "GET":
+            if HOLD2 == "draft-read":
+                open(os.environ["FAKE_FORGE_MARK"] + ".2", "w").close()
+                time.sleep(3)
             r = releases.get(int(parts[2]))
             return self.reply(200, {"id": r["id"], "draft": r["draft"]}) if r else self.reply(404, {"message": "not found"})
         if len(parts) == 3 and m == "PATCH":
