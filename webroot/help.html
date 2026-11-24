@@ -456,11 +456,13 @@ engine=auto</pre>
 ├── managed           <span class="cm">settings the module has changed</span>
 ├── original          <span class="cm">values from right before the first change</span>
 ├── logs/service.log  <span class="cm">rotates at 128 KB</span>
-└── run/              <span class="cm">runtime only, cleared on boot</span>
+├── logs/uninstall.log  <span class="cm">what uninstall did; kept with the saved values if the settings service never answered</span>
+└── run/              <span class="cm">runtime only</span>
     ├── state         <span class="cm">counters, engine, pids</span>
-    ├── daemon.pid
-    ├── watcher.pid
-    ├── events        <span class="cm">FIFO between inotifyd and the daemon</span>
+    ├── daemon.pid    <span class="cm">cleared on boot</span>
+    ├── watcher.pid   <span class="cm">cleared on boot</span>
+    ├── events        <span class="cm">FIFO between inotifyd and the daemon, cleared on boot</span>
+    ├── locks/        <span class="cm">apply, config and scan locks, cleared on boot</span>
     ├── mock-scan     <span class="cm">per-app scan results (package, version, 0/1)</span>
     └── mock-scan.stamp  <span class="cm">packages.xml state the scan matches</span></pre>
   <p>Nothing mutable lives in the module directory, because a module update replaces it wholesale.</p>
