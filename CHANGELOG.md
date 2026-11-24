@@ -7,6 +7,10 @@ All notable changes to Developer Options Persist are documented here.
 **WebUI**
 - Help: the contents and the links to other sections no longer add steps to the phone's Back. One Back leaves the help page, however many sections you opened.
 
+**Fork fixes**
+- Apply Now says "Apply busy, try again" while another apply is running, and shows an error when the daemon could not be restarted, instead of a green "Applied".
+- Help: the file layout lists the uninstall log and says which runtime files a reboot clears.
+
 ---
 
 ## v10
