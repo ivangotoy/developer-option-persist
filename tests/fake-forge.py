@@ -7,17 +7,21 @@ Every request is logged as one JSON line (method, path, Authorization header,
 body size). FAKE_FORGE_FAIL=upload answers asset uploads with 500, =publish the publish PATCH,
 =publish-lost applies the publish PATCH and then answers 500 (a lost reply),
 =draft-lost creates the draft release and then answers 500, =tag-unreadable answers the tag
-read of a published release with 404.
+read of a published release with 404. FAKE_FORGE_HOLD=draft (after creating the draft), =upload
+or =tag (the tag read of a published release) holds that request: it touches FAKE_FORGE_MARK, so
+a test can signal the release script while the request is in flight, and answers 500 after 30 s.
 """
 import json
 import os
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 PORT_FILE, LOG_FILE, ORIGIN, REPO = sys.argv[1:5]
 FAIL = os.environ.get("FAKE_FORGE_FAIL", "")
+HOLD = os.environ.get("FAKE_FORGE_HOLD", "")
 API = f"/api/v1/repos/{REPO}"
 releases = {}
 assets = {}
@@ -49,6 +53,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(data)
 
+    def hold(self):
+        open(os.environ["FAKE_FORGE_MARK"], "w").close()
+        time.sleep(30)
+        return self.reply(500, {"message": "held request"})
+
     def handle_any(self):
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else b""
@@ -65,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         if m == "GET" and p.startswith(API + "/tags/"):
             tag = p.rsplit("/", 1)[1]
             r = [x for x in releases.values() if x["tag"] == tag and not x["draft"]]
+            if r and HOLD == "tag":
+                return self.hold()
             if r and FAIL == "tag-unreadable":
                 return self.reply(404, {"message": "forced failure after publish"})
             return self.reply(200, {"name": tag, "commit": {"sha": r[0]["target"]}}) if r else self.reply(404, {"message": "not found"})
@@ -74,6 +85,8 @@ class Handler(BaseHTTPRequestHandler):
             next_id[0] += 1
             releases[rid] = {"id": rid, "tag": req["tag_name"], "target": req["target_commitish"],
                              "draft": req["draft"], "name": req["name"], "body": req["body"]}
+            if HOLD == "draft":
+                return self.hold()
             if FAIL == "draft-lost":
                 return self.reply(500, {"message": "forced failure after the change"})
             return self.reply(201, {"id": rid})
@@ -81,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[3] == "assets" and m == "POST":
             if FAIL == "upload":
                 return self.reply(500, {"message": "forced failure"})
+            if HOLD == "upload":
+                return self.hold()
             rid = int(parts[2])
             name = parse_qs(url.query)["name"][0]
             aid = 100 + len(assets)

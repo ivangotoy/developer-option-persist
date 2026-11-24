@@ -7,7 +7,8 @@
 #                                   draft -> upload -> download back and verify ->
 #                                   push merge -> publish -> commit update.json
 # The release step runs this script and the config as fetched from the dispatched
-# commit, never the copies in the build workspace. A failure before publish
+# commit, never the copies in the build workspace. A failure before publish (also a run
+# ended by TERM or HUP)
 # deletes the draft once the forge confirms it is still one (a lost reply to the
 # draft request is logged instead). The merge with upstream is pushed to main right before the
 # publish call, so a failure before that push pushes nothing, and a failed
@@ -240,9 +241,15 @@ unzip -tq "$ZIP" >/dev/null || die "zip test failed"
 ZIP_SHA="$(sha "$ZIP")"
 log "zip $ZIP_NAME sha256 $ZIP_SHA"
 
-RELEASE_ID="" PUBLISHED=0 DRAFT_REQUESTED=0 RECORDED=0
+RELEASE_ID="" PUBLISHED=0 DRAFT_REQUESTED=0 RECORDED=0 DONE=0
 cleanup() {
     rc=$?
+    if [ "$rc" -eq 0 ] && [ "$DONE" != 1 ]; then
+        # bash runs this trap with $? = 0 when TERM or HUP (job cancel, timeout) ends the script:
+        # an unfinished run is a failed one, logged before any request below can hang
+        rc=1
+        log "failure: interrupted (tag $TAG, release ${RELEASE_ID:-not created})"
+    fi
     if [ "$rc" -ne 0 ] && [ "$PUBLISHED" = 1 ] && [ "$RECORDED" != 1 ]; then
         # live, but no root manager is offered it until update.json names it
         log "failure: release $TAG is published but $UPDATE_JSON_PATH in main was not updated: commit it by hand"
@@ -325,4 +332,5 @@ for i in 1 2 3 4 5; do
     [ "$got" = "$VC" ] && break; sleep 5
 done
 [ "$got" = "$VC" ] || die "$UPDATE_URL answers versionCode '$got', expected $VC"
+DONE=1
 log "done: $UPDATE_URL -> $TAG"

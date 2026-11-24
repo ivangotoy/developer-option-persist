@@ -50,6 +50,36 @@ exec "$REAL_GIT" "\$@"
 EOF
 chmod 755 "$W/bin/curl" "$W/bin/git"
 
+# run_signalled SIG pid|group MARK CMD... - runs CMD in a session of its own with the default
+# signal dispositions (a background job of this script would ignore INT), sends SIG to CMD or to its
+# process group once MARK exists, and returns CMD's status (128 + signal number when it was killed).
+# Whatever CMD left in that session (a curl still in a held request) is killed afterwards.
+run_signalled() {
+  python3 -I - "$@" <<'PY'
+import os, signal, subprocess, sys, time
+sig, target, mark = getattr(signal, "SIG" + sys.argv[1]), sys.argv[2], sys.argv[3]
+def dfl():
+    for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, signal.SIG_DFL)
+p = subprocess.Popen(sys.argv[4:], preexec_fn=dfl, start_new_session=True)
+end = time.time() + 60
+while p.poll() is None and not os.path.exists(mark) and time.time() < end:
+    time.sleep(0.05)
+if p.poll() is None and os.path.exists(mark):
+    (os.killpg if target == "group" else os.kill)(p.pid, sig)
+try:
+    rc = p.wait(timeout=60)
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    rc = p.wait()
+try:
+    os.killpg(p.pid, signal.SIGKILL)
+except ProcessLookupError:
+    pass
+sys.exit(128 - rc if rc < 0 else rc)
+PY
+}
+
 # scenario NAME CONF_LINES VERSION FAIL - fork main (BASE) and upstream (one new commit)
 # from this tree, a build of their merge like the build step makes, then the release
 scenario() {
@@ -123,16 +153,22 @@ PY
   SRC=$(head -n1 "$S/src/.ci-out/src")
 
   rm -f "$S/port"
-  FAKE_FORGE_FAIL="$4" python3 -I "$REPO/tests/fake-forge.py" "$S/port" "$S/requests" "$S/origin.git" "$REPOSITORY" &
+  FAKE_FORGE_FAIL="$4" FAKE_FORGE_HOLD="${HOLD:-}" FAKE_FORGE_MARK="$S/held" \
+    python3 -I "$REPO/tests/fake-forge.py" "$S/port" "$S/requests" "$S/origin.git" "$REPOSITORY" &
   SERVER_PID=$!
   for _ in $(seq 100); do [ -f "$S/port" ] && break; sleep 0.1; done
   [ -f "$S/port" ] || { bad "$1: fake forge did not start"; return 1; }
   SERVER_URL="http://127.0.0.1:$(cat "$S/port")"
   printf '[url "file://%s/origin.git"]\n\tinsteadOf = %s/%s.git\n' "$S" "$SERVER_URL" "$REPOSITORY" >> "$GIT_CONFIG_GLOBAL"
 
-  (cd "$S" && GIT_ALLOW_PROTOCOL=file PATH="$W/bin:$PATH" TMPDIR="$S/tmp" MCI_LOG="$S/log" SERVER_URL="$SERVER_URL" \
-    REPOSITORY="$REPOSITORY" BASE_SHA="$RUN_BASE" RELEASE_TOKEN="$TOKEN" RUN_NUMBER="$RUN_NUMBER" \
-    bash "$REPO/.forgejo/module-ci.sh" release "$S/src") > "$S/out" 2>&1
+  # SIG=TERM|HUP|INT (SIG_TO=pid|group): sent once the fake forge holds the HOLD request
+  (cd "$S" && export GIT_ALLOW_PROTOCOL=file PATH="$W/bin:$PATH" TMPDIR="$S/tmp" MCI_LOG="$S/log" SERVER_URL="$SERVER_URL" \
+    REPOSITORY="$REPOSITORY" BASE_SHA="$RUN_BASE" RELEASE_TOKEN="$TOKEN" RUN_NUMBER="$RUN_NUMBER" &&
+    if [ -n "${SIG:-}" ]; then
+      run_signalled "$SIG" "${SIG_TO:-pid}" "$S/held" bash "$REPO/.forgejo/module-ci.sh" release "$S/src"
+    else
+      bash "$REPO/.forgejo/module-ci.sh" release "$S/src"
+    fi) > "$S/out" 2>&1
   RC=$?
   cp "$S/requests" "$S/requests.release" 2>/dev/null
   "$REAL_CURL" -fsS -o "$S/asset.zip" "$SERVER_URL/$REPOSITORY/releases/download/$TAG/$ZIP_NAME" 2>/dev/null || rm -f "$S/asset.zip"
@@ -249,6 +285,30 @@ check "failure after publish: published release not deleted" bash -c 'grep -q "^
 check "failure after publish: update.json not committed" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main 2>/dev/null)" = "$SRC" ]
 check "failure after publish: logged that update.json still names the previous release" grep -qF "release $TAG is published but .forgejo/update.json in main was not updated" "$S/out"
 check "failure after publish: header file removed" tmp_empty
+
+# ---------- runner signal (job cancel or timeout) while a forge request is in flight ----------
+# bash runs the EXIT trap of a script ended by TERM or HUP (or INT to its process group) with $? = 0
+
+HOLD=upload SIG=TERM scenario term-upload "" "" ""
+check "TERM during the upload: exits non-zero" [ "$RC" != 0 ]
+check "TERM during the upload: logged as interrupted" grep -qF "interrupted (tag $TAG, release 1)" "$S/out"
+check "TERM during the upload: draft deleted" grep -qx "DELETE $A/releases/1 auth" "$S/calls"
+check "TERM during the upload: nothing published" not_published
+check "TERM during the upload: header file removed" tmp_empty
+HOLD=upload SIG=HUP scenario hup-upload "" "" ""
+check "HUP during the upload: exits non-zero, draft deleted" bash -c '[ "$1" != 0 ] && grep -qx "DELETE $2/releases/1 auth" "$3"' _ "$RC" "$A" "$S/calls"
+HOLD=upload SIG=INT SIG_TO=group scenario int-upload "" "" ""
+check "INT to the process group during the upload: exits non-zero, draft deleted" bash -c '[ "$1" != 0 ] && grep -qx "DELETE $2/releases/1 auth" "$3"' _ "$RC" "$A" "$S/calls"
+check "INT to the process group during the upload: header file removed" tmp_empty
+HOLD=draft SIG=TERM scenario term-draft "" "" ""
+check "TERM during the draft request: exits non-zero" [ "$RC" != 0 ]
+check "TERM during the draft request: tag logged for a check by hand" grep -qF "the draft request for $TAG failed or its reply was lost" "$S/out"
+check "TERM during the draft request: nothing deleted or published" not grep -q "^DELETE \|^PATCH " "$S/calls"
+HOLD=tag SIG=TERM scenario term-published "" "" ""
+check "TERM after publish: exits non-zero" [ "$RC" != 0 ]
+check "TERM after publish: published release not deleted" not grep -q "^DELETE " "$S/calls"
+check "TERM after publish: logged that update.json still names the previous release" grep -qF "release $TAG is published but .forgejo/update.json in main was not updated" "$S/out"
+check "TERM after publish: header file removed" tmp_empty
 
 # ---------- draft created by the forge, reply lost ----------
 
