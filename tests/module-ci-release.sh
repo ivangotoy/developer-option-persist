@@ -92,6 +92,14 @@ scenario() {
   printf '[url "file://%s/upstream.git"]\n\tinsteadOf = https://github.com/nikakvo/developer-option-persist.git\n' "$S" >> "$GIT_CONFIG_GLOBAL"
   (cd "$REPO" && tar -c --exclude=./.git --exclude=./.ci-out .) | tar -x -C "$S/seed"
   [ -n "$2" ] && printf '%s\n' "$2" >> "$S/seed/.forgejo/module-ci.conf"
+  # the update.json main publishes before this release: versionCode 1, or PUB=<versionCode>,
+  # PUB=none (no file), PUB=bad (no versionCode in it); never the repo's live file
+  case "${PUB:-1}" in
+    none) rm -f "$S/seed/.forgejo/update.json" ;;
+    bad) printf '{}\n' > "$S/seed/.forgejo/update.json" ;;
+    *) printf '{"version": "v0-ci1", "versionCode": %s, "zipUrl": "https://forge.example.invalid/v0-ci1.zip", "changelog": ""}\n' \
+         "${PUB:-1}" > "$S/seed/.forgejo/update.json" ;;
+  esac
   if [ -n "$3" ]; then
     awk -v v="$3" '/^version=/ { print "version=" v; next } { print }' "$S/seed/module.prop" > "$S/module.prop"
     cp "$S/module.prop" "$S/seed/module.prop"
@@ -339,6 +347,19 @@ VERSION_CODE_FLOOR=$((BUILT_VC + 1))" "" ""
 check "versionCode $BUILT_VC again: exits non-zero" [ "$RC" != 0 ]
 check "versionCode $BUILT_VC again: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
 check "versionCode $BUILT_VC again: says why" grep -q "versionCode $BUILT_VC is below the floor $((BUILT_VC + 1))" "$S/out"
+
+# ---------- versionCode against the one update.json in main publishes ----------
+
+PUB=$VC scenario published-same "" "" ""
+check "versionCode $VC already published: exits non-zero" [ "$RC" != 0 ]
+check "versionCode $VC already published: stops before the draft" not grep -q "^POST $A/releases" "$S/calls"
+check "versionCode $VC already published: says why" grep -qF "versionCode $VC is not above $VC, which .forgejo/update.json in main publishes now" "$S/out"
+PUB=$((VC - 1)) scenario published-lower "" "" ""
+check "versionCode $VC over a published $((VC - 1)): released" bash -c '[ "$1" = 0 ] && [ "$2" = "$3" ]' _ "$RC" "$(origin_show .forgejo/update.json | json_get versionCode)" "$VC"
+PUB=none scenario published-none "" "" ""
+check "no update.json in main yet (first release): released" [ "$RC" = 0 ]
+PUB=bad scenario published-bad "" "" ""
+check "update.json in main without a versionCode: stops before the draft and says why" bash -c '[ "$1" != 0 ] && ! grep -q "^POST $2/releases" "$3" && grep -qF ".forgejo/update.json in main has no readable versionCode" "$4"' _ "$RC" "$A" "$S/calls" "$S/out"
 
 # ---------- dispatched commit not on main ----------
 

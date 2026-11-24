@@ -17,7 +17,8 @@
 # Per-repo settings: .forgejo/module-ci.conf (sourced shell)
 #   UPSTREAM_URL, UPSTREAM_BRANCH   upstream merged into main ("" = none)
 #   ZIP_PREFIX                      release zip name prefix
-#   VERSION_CODE_FLOOR              lowest versionCode allowed to release
+#   VERSION_CODE_FLOOR              lowest versionCode allowed to release (it must also be above
+#                                   the versionCode that UPDATE_JSON_PATH in main publishes)
 #   VERSION_CODE_OFFSET             added to the built versionCode (default 0)
 #   UPDATE_JSON_PATH                update.json path in main (default .forgejo/update.json)
 #   SYNC_ROOT_PROP                  fork-owned module.prop in main kept at the released version
@@ -187,6 +188,12 @@ case "$BUILT_VC" in ''|*[!0-9]*) die "built versionCode '$BUILT_VC' is not a num
 VERSION="$(printf '%s' "$BUILT_VERSION" | sed -E 's/-(fork|ci)[0-9]+$//')-ci$RUN_NUMBER"
 VC=$((BUILT_VC + VERSION_CODE_OFFSET))
 [ "$VC" -ge "$VERSION_CODE_FLOOR" ] || die "versionCode $VC is below the floor $VERSION_CODE_FLOOR"
+# a root manager offers an update only for a versionCode above the one it already has
+if git cat-file -e "HEAD:$UPDATE_JSON_PATH" 2>/dev/null; then
+    PUB_VC="$(git show "HEAD:$UPDATE_JSON_PATH" | jget versionCode 2>/dev/null || true)"
+    case "$PUB_VC" in ''|*[!0-9]*) die "$UPDATE_JSON_PATH in main has no readable versionCode" ;; esac
+    [ "$VC" -gt "$PUB_VC" ] || die "versionCode $VC is not above $PUB_VC, which $UPDATE_JSON_PATH in main publishes now"
+fi
 TAG="$(printf '%s' "$VERSION" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/-+/-/g; s/^-//; s/-$//')"
 case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
 ZIP_NAME="$ZIP_PREFIX-$TAG.zip"
