@@ -118,7 +118,9 @@ scenario() {
     "$REAL_GIT" init -q --bare "$S/origin.git"
     "$REAL_GIT" init -q --bare "$S/upstream.git"
     "$REAL_GIT" push -q "$S/origin.git" main:refs/heads/main
-    "$REAL_GIT" push -q "$S/upstream.git" up:refs/heads/main
+    # UP_MERGED=1: upstream main is already in fork main (the state after a merge by hand)
+    if [ -n "${UP_MERGED:-}" ]; then "$REAL_GIT" push -q "$S/upstream.git" main:refs/heads/main
+    else "$REAL_GIT" push -q "$S/upstream.git" up:refs/heads/main; fi
   ) || { bad "$1: fixture repos"; return 1; }
   BASE=$("$REAL_GIT" -C "$S/seed" rev-parse main)
   # OFF_MAIN=1: dispatch a commit that is in the clone (branch side) but not on main
@@ -139,9 +141,10 @@ scenario() {
     "$REAL_GIT" checkout -q -B main "$BASE"
     "$REAL_GIT" fetch -q https://github.com/nikakvo/developer-option-persist.git main
     up=$("$REAL_GIT" rev-parse FETCH_HEAD)
-    "$REAL_GIT" merge -q --no-ff --no-edit -m "Merge nikakvo/developer-option-persist main ${up:0:12}" "$up"
+    "$REAL_GIT" merge-base --is-ancestor "$up" HEAD ||
+      "$REAL_GIT" merge -q --no-ff --no-edit -m "Merge nikakvo/developer-option-persist main ${up:0:12}" "$up"
     mkdir .ci-out
-    "$REAL_GIT" bundle create -q .ci-out/merge.bundle "$BASE..main"
+    [ "$("$REAL_GIT" rev-parse HEAD)" = "$BASE" ] || "$REAL_GIT" bundle create -q .ci-out/merge.bundle "$BASE..main"
     printf '%s\n%s\n' "$("$REAL_GIT" rev-parse HEAD)" "$up" > .ci-out/src
     printf 'nikakvo/developer-option-persist@main %s\n' "${up:0:12}" > .ci-out/desc
     WORK="$S/src" OUT="$S/src/.ci-out"
@@ -257,6 +260,16 @@ check "release: git clone and pushes get the token from the environment" bash -c
 check "release: header file removed after success" tmp_empty
 check "release: every curl call has --connect-timeout 30 --max-time 600" curl_timeouts
 check "release: --retry on GET API calls only, never POST/PATCH/DELETE" retry_reads_only
+
+# ---------- upstream already merged into main: nothing to merge or push before the publish ----------
+
+UP_MERGED=1 scenario release-merged "" "" ""
+check "upstream already merged: exits 0" [ "$RC" = 0 ]
+check "upstream already merged: built from the dispatched commit itself" [ "$SRC" = "$BASE" ]
+check "upstream already merged: same forge calls as a release with a merge" same_file "$W/release/want" "$S/calls"
+check "upstream already merged: update.json commit right on top of the dispatched commit" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main^ 2>/dev/null)" = "$BASE" ]
+check "upstream already merged: one push (update.json), none for a merge" bash -c 'grep -qx clone "$1" && [ "$(grep -cx push "$1")" = 1 ]' _ "$S/log/git-env-auth"
+check "upstream already merged: update.json versionCode" [ "$(origin_show .forgejo/update.json | json_get versionCode)" = "$VC" ]
 
 # ---------- failure after the draft exists ----------
 
