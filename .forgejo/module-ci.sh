@@ -267,7 +267,7 @@ cleanup() {
     fi
     if [ "$rc" -ne 0 ] && [ "$PUBLISHED" = 1 ] && [ "$RECORDED" != 1 ]; then
         # live, but no root manager is offered it until update.json names it
-        log "failure: release $TAG is published but $UPDATE_JSON_PATH in main was not updated: commit it by hand"
+        log "failure: release $TAG is published but $UPDATE_JSON_PATH in main was not updated, so no root manager is offered it: dispatch the release again"
     fi
     if [ "$rc" -ne 0 ] && [ -z "$RELEASE_ID" ] && [ "$DRAFT_REQUESTED" = 1 ]; then
         # a rejected request, or one the forge applied with its reply lost: no id to delete by
