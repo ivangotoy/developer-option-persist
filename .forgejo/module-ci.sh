@@ -113,9 +113,17 @@ if [ "$MODE" = build ]; then
         exec env ${drop[@]+"${drop[@]}"} setpriv --reuid="$BUILD_UID" --regid="$BUILD_UID" --clear-groups \
             bash "$WORK/.forgejo/module-ci.sh" build-user "$WORK"
     ) || build_rc=$?
+    # the build user's processes end before this root half touches its files again
+    setpriv --reuid="$BUILD_UID" --regid="$BUILD_UID" --clear-groups kill -9 -1 2>/dev/null || true
     [ "${build_rc:-0}" = 0 ] || die "build failed"
+    # .ci-out belongs to the build user: no link in it is followed as root
+    [ -d "$OUT" ] && [ ! -L "$OUT" ] || die "$OUT is not a directory"
     [ -f "$OUT/module.zip" ] || die "build left no $OUT/module.zip"
-    [ -f "$OUT/upstream-desc" ] && DESC="$(head -n1 "$OUT/upstream-desc")"
+    if [ -e "$OUT/upstream-desc" ] || [ -L "$OUT/upstream-desc" ]; then
+        [ -f "$OUT/upstream-desc" ] && [ ! -L "$OUT/upstream-desc" ] || die "$OUT/upstream-desc is not a regular file"
+        DESC="$(head -n1 "$OUT/upstream-desc")"
+    fi
+    rm -f "$OUT/desc"
     printf '%s\n' "$DESC" > "$OUT/desc"
     log "build done"
     exit 0

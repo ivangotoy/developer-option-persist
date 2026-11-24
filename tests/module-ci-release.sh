@@ -456,6 +456,28 @@ RC=$?
 check "build step, failed build: exits non-zero with the build's error" bash -c '[ "$1" != 0 ] && grep -q "example build failure" "$2" && ! grep -q "unbound variable" "$2"' _ "$RC" "$F/out"
 check "build step, failed build: the build user's kill -9 -1 still reached the recording stub" grep -qx "kill -9 -1" "$S/setpriv-refused"
 
+# .ci-out belongs to the build user: links that build() leaves there must not make the root half
+# read or write a file outside it. build_case NAME BUILD_BODY runs the build step on a fixture whose
+# build() is BUILD_BODY (with $X = a directory outside the work tree).
+build_case() {
+  G="$W/$1"
+  mkdir -p "$G/src/.forgejo" "$G/x"
+  cp "$REPO/.forgejo/module-ci.sh" "$G/src/.forgejo/"
+  printf 'build() { X=%s; %s; }\n' "$G/x" "$2" > "$G/src/.forgejo/module-ci.conf"
+  ( cd "$G/src" && "$REAL_GIT" init -q && "$REAL_GIT" add -A && "$REAL_GIT" commit -q -m "example base" ) || bad "$1: fixture repo"
+  (cd "$G" && env -u WORK -u OUT -u BUILD_UID PATH="$S/bin:$PATH" SERVER_URL=http://127.0.0.1:1 \
+    REPOSITORY="$REPOSITORY" BASE_SHA="$("$REAL_GIT" -C "$G/src" rev-parse HEAD)" \
+    timeout 60 bash "$REPO/.forgejo/module-ci.sh" build "$G/src") > "$G/out" 2>&1
+  RC=$?
+}
+build_case build-desc-link 'echo example-target > "$X/target"; ln -s "$X/target" "$OUT/desc"; : > "$OUT/module.zip"'
+check "build step, desc left as a link by build(): the file it points at is not written" [ "$(cat "$G/x/target")" = example-target ]
+check "build step, desc left as a link by build(): desc written as a file of its own" bash -c '[ "$1" = 0 ] && [ -f "$2" ] && [ ! -L "$2" ]' _ "$RC" "$G/src/.ci-out/desc"
+build_case build-updesc-link 'echo example-secret > "$X/secret"; ln -s "$X/secret" "$OUT/upstream-desc"; : > "$OUT/module.zip"'
+check "build step, upstream-desc left as a link by build(): fails without reading it" bash -c '[ "$1" != 0 ] && ! grep -q example-secret "$2/src/.ci-out/desc" 2>/dev/null && grep -q "upstream-desc is not a regular file" "$2/out"' _ "$RC" "$G"
+build_case build-out-link 'mkdir "$X/out"; : > "$X/out/module.zip"; rm -rf "$OUT"; ln -s "$X/out" "$OUT"'
+check "build step, .ci-out replaced by a link: fails without writing through it" bash -c '[ "$1" != 0 ] && [ ! -e "$2/x/out/desc" ]' _ "$RC" "$G"
+
 # the build step ended by TERM (job cancel or timeout) while the build runs: the build user's
 # processes are still killed
 G="$W/build-term"
