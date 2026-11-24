@@ -456,4 +456,19 @@ RC=$?
 check "build step, failed build: exits non-zero with the build's error" bash -c '[ "$1" != 0 ] && grep -q "example build failure" "$2" && ! grep -q "unbound variable" "$2"' _ "$RC" "$F/out"
 check "build step, failed build: the build user's kill -9 -1 still reached the recording stub" grep -qx "kill -9 -1" "$S/setpriv-refused"
 
+# the build step ended by TERM (job cancel or timeout) while the build runs: the build user's
+# processes are still killed
+G="$W/build-term"
+mkdir -p "$G/src/.forgejo"
+cp "$REPO/.forgejo/module-ci.sh" "$G/src/.forgejo/"
+printf 'build() { : > "$OUT/started"; sleep 30; }\n' > "$G/src/.forgejo/module-ci.conf"
+( cd "$G/src" && "$REAL_GIT" init -q && "$REAL_GIT" add -A && "$REAL_GIT" commit -q -m "example base" ) || bad "build TERM: fixture repo"
+: > "$S/setpriv-refused"
+(cd "$G" && unset WORK OUT BUILD_UID && export PATH="$S/bin:$PATH" SERVER_URL=http://127.0.0.1:1 \
+  REPOSITORY="$REPOSITORY" BASE_SHA="$("$REAL_GIT" -C "$G/src" rev-parse HEAD)" &&
+  run_signalled TERM pid "$G/src/.ci-out/started" bash "$REPO/.forgejo/module-ci.sh" build "$G/src") > "$G/out" 2>&1
+RC=$?
+check "build step ended by TERM: exits non-zero" [ "$RC" != 0 ]
+check "build step ended by TERM: the build user's kill -9 -1 still reached the recording stub" grep -qx "kill -9 -1" "$S/setpriv-refused"
+
 exit 0
