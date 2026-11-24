@@ -240,9 +240,13 @@ unzip -tq "$ZIP" >/dev/null || die "zip test failed"
 ZIP_SHA="$(sha "$ZIP")"
 log "zip $ZIP_NAME sha256 $ZIP_SHA"
 
-RELEASE_ID="" PUBLISHED=0 DRAFT_REQUESTED=0
+RELEASE_ID="" PUBLISHED=0 DRAFT_REQUESTED=0 RECORDED=0
 cleanup() {
     rc=$?
+    if [ "$rc" -ne 0 ] && [ "$PUBLISHED" = 1 ] && [ "$RECORDED" != 1 ]; then
+        # live, but no root manager is offered it until update.json names it
+        log "failure: release $TAG is published but $UPDATE_JSON_PATH in main was not updated: commit it by hand"
+    fi
     if [ "$rc" -ne 0 ] && [ -z "$RELEASE_ID" ] && [ "$DRAFT_REQUESTED" = 1 ]; then
         # a rejected request, or one the forge applied with its reply lost: no id to delete by
         log "failure: the draft request for $TAG failed or its reply was lost; the forge may hold that draft: check it by hand"
@@ -314,6 +318,7 @@ if [ -n "$SYNC_ROOT_PROP" ]; then
 fi
 git commit -q -m "update.json: $VERSION (versionCode $VC)"
 git_auth push -q origin HEAD:refs/heads/main || die "push of update.json failed"
+RECORDED=1
 got=""
 for i in 1 2 3 4 5; do
     got="$(curl -fsS --connect-timeout 30 --max-time 600 "$UPDATE_URL" | jget versionCode || true)"

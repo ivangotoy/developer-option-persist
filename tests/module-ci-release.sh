@@ -241,6 +241,15 @@ check "publish reply lost: exits non-zero" [ "$RC" != 0 ]
 check "publish reply lost: release state read before the cleanup" grep -qx "GET $A/releases/1 auth" "$S/calls"
 check "publish reply lost: published release not deleted" not grep -q "^DELETE " "$S/calls"
 
+# ---------- failure after publish, before update.json is committed ----------
+
+scenario fail-after-publish "" "" tag-unreadable
+check "failure after publish: exits non-zero" [ "$RC" != 0 ]
+check "failure after publish: published release not deleted" bash -c 'grep -q "^PATCH $1/releases/1 auth$" "$2" && ! grep -q "^DELETE " "$2"' _ "$A" "$S/calls"
+check "failure after publish: update.json not committed" [ "$("$REAL_GIT" --git-dir "$S/origin.git" rev-parse main 2>/dev/null)" = "$SRC" ]
+check "failure after publish: logged that update.json still names the previous release" grep -qF "release $TAG is published but .forgejo/update.json in main was not updated" "$S/out"
+check "failure after publish: header file removed" tmp_empty
+
 # ---------- draft created by the forge, reply lost ----------
 
 scenario fail-draft-lost "" "" draft-lost
